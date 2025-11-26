@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from database import Database
 import json
 import os
+from dotenv import load_dotenv
 
 # Configuración de la página
 st.set_page_config(
@@ -219,7 +220,7 @@ def calculate_available_slots(date, services):
 
 def send_webhook_to_n8n(booking_data):
     """Envía webhook a n8n con los datos de la reserva"""
-    webhook_url = "https://www.awtomations.com/webhook-test/99d4d0bf-709c-46ae-b5a6-23c5aa34dab3"
+    webhook_url = os.getenv('N8N_WEBHOOK_URL')
     
     try:
         response = requests.post(webhook_url, json=booking_data, timeout=10)
