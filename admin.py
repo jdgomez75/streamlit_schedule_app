@@ -401,7 +401,7 @@ if view_mode == "📅 Calendario del Día":
     # Agrupar citas por hora
     hours_data = {}
     for booking in bookings:
-        hour = booking['start_time'].split(':')[0]
+        hour = str(booking['start_time']).split(':')[0]
         if hour not in hours_data:
             hours_data[hour] = 0
         hours_data[hour] += 1
