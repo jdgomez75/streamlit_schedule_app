@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime, timedelta
-from database import Database
+from src.database import Database
+
 
 def _row_to_dict(cursor, row):
     """Convierte una fila de PostgreSQL a diccionario"""

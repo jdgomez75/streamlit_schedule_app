@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 from datetime import datetime, timedelta
-from database import Database
+from src.database import Database
 import json
 import os
 from dotenv import load_dotenv

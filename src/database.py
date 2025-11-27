@@ -857,3 +857,317 @@ class Database:
         
         except Exception as e:
             return False, f"❌ Error: {str(e)}"
+        
+
+"""
+database_auth_methods.py - Métodos de autenticación para agregar a la clase Database
+Copia estos métodos y pégalos en tu archivo database.py
+"""
+
+# ==================== MÉTODOS DE AUTENTICACIÓN ====================
+# Agregar estos métodos a la clase Database en database.py
+
+def authenticate_user(self, username, password_hash):
+    """
+    Autentica un usuario verificando usuario y contraseña
+    
+    Args:
+        username (str): Nombre de usuario
+        password_hash (str): Hash SHA-256 de la contraseña
+        
+    Returns:
+        dict: Información del usuario si es válido, None si no
+    """
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, username, name, email, password_hash
+                FROM users
+                WHERE username = %s
+            """, (username,))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                user_id, user, name, email, stored_hash = result
+                
+                # Verificar contraseña
+                if stored_hash == password_hash:
+                    # Actualizar último login
+                    cursor.execute("""
+                        UPDATE users 
+                        SET last_login = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id,))
+                    conn.commit()
+                    
+                    return {
+                        'id': user_id,
+                        'username': user,
+                        'name': name,
+                        'email': email,
+                        'authenticated': True
+                    }
+            
+            return None
+    except Exception as e:
+        print(f"Error en autenticación: {e}")
+        return None
+
+def get_user_by_username(self, username):
+    """
+    Obtiene información de un usuario por su nombre de usuario
+    
+    Args:
+        username (str): Nombre de usuario
+        
+    Returns:
+        dict: Información del usuario, None si no existe
+    """
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, username, name, email, password_hash, created_at, last_login
+                FROM users
+                WHERE username = %s
+            """, (username,))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'id': result[0],
+                    'username': result[1],
+                    'name': result[2],
+                    'email': result[3],
+                    'password_hash': result[4],
+                    'created_at': str(result[5]) if result[5] else None,
+                    'last_login': str(result[6]) if result[6] else None
+                }
+            
+            return None
+    except Exception as e:
+        print(f"Error al obtener usuario: {e}")
+        return None
+
+def register_new_user(self, username, email, name, password_hash):
+    """
+    Registra un nuevo usuario en la base de datos
+    
+    Args:
+        username (str): Nombre de usuario único
+        email (str): Email del usuario
+        name (str): Nombre completo
+        password_hash (str): Hash SHA-256 de la contraseña
+        
+    Returns:
+        (bool, str): (éxito, mensaje)
+    """
+    try:
+        # Verificar que el usuario no exista
+        existing = self.get_user_by_username(username)
+        if existing:
+            return False, "El usuario ya existe"
+        
+        # Verificar que el email no exista
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+            if cursor.fetchone():
+                return False, "El email ya está registrado"
+        
+        # Crear nuevo usuario
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO users (username, email, name, password_hash, created_at)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                RETURNING id
+            """, (username, email, name, password_hash))
+            
+            user_id = cursor.fetchone()[0]
+            conn.commit()
+            
+            return True, f"Usuario registrado exitosamente (ID: {user_id})"
+    
+    except Exception as e:
+        return False, f"Error al registrar usuario: {str(e)}"
+
+def update_user_password(self, user_id, new_password_hash):
+    """
+    Actualiza la contraseña de un usuario
+    
+    Args:
+        user_id (int): ID del usuario
+        new_password_hash (str): Nuevo hash SHA-256 de la contraseña
+        
+    Returns:
+        (bool, str): (éxito, mensaje)
+    """
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE users
+                SET password_hash = %s
+                WHERE id = %s
+            """, (new_password_hash, user_id))
+            
+            conn.commit()
+            return True, "Contraseña actualizada exitosamente"
+    
+    except Exception as e:
+        return False, f"Error al actualizar contraseña: {str(e)}"
+
+def get_all_users(self):
+    """
+    Obtiene todos los usuarios registrados
+    
+    Returns:
+        list: Lista de usuarios
+    """
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, username, name, email, created_at, last_login
+                FROM users
+                ORDER BY created_at DESC
+            """)
+            
+            return [self._row_to_dict(cursor, row) for row in cursor.fetchall()]
+    
+    except Exception as e:
+        print(f"Error al obtener usuarios: {e}")
+        return []
+
+def delete_user(self, user_id):
+    """
+    Elimina un usuario (soft delete - mantiene datos)
+    
+    Args:
+        user_id (int): ID del usuario
+        
+    Returns:
+        (bool, str): (éxito, mensaje)
+    """
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Verificar que el usuario existe
+            cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+            if not cursor.fetchone():
+                return False, "Usuario no encontrado"
+            
+            # Soft delete (marcar como inactivo)
+            cursor.execute("""
+                UPDATE users
+                SET active = FALSE
+                WHERE id = %s
+            """, (user_id,))
+            
+            conn.commit()
+            return True, "Usuario eliminado exitosamente"
+    
+    except Exception as e:
+        return False, f"Error al eliminar usuario: {str(e)}"
+
+def update_user_email(self, user_id, new_email):
+    """
+    Actualiza el email de un usuario
+    
+    Args:
+        user_id (int): ID del usuario
+        new_email (str): Nuevo email
+        
+    Returns:
+        (bool, str): (éxito, mensaje)
+    """
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Verificar que el nuevo email no esté en uso
+            cursor.execute("""
+                SELECT id FROM users WHERE email = %s AND id != %s
+            """, (new_email, user_id))
+            
+            if cursor.fetchone():
+                return False, "El email ya está en uso"
+            
+            # Actualizar email
+            cursor.execute("""
+                UPDATE users
+                SET email = %s
+                WHERE id = %s
+            """, (new_email, user_id))
+            
+            conn.commit()
+            return True, "Email actualizado exitosamente"
+    
+    except Exception as e:
+        return False, f"Error al actualizar email: {str(e)}"
+
+def get_user_login_history(self, user_id, limit=10):
+    """
+    Obtiene el historial de logins de un usuario
+    
+    Args:
+        user_id (int): ID del usuario
+        limit (int): Máximo número de registros
+        
+    Returns:
+        list: Historial de logins
+    """
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, last_login
+                FROM users
+                WHERE id = %s
+                LIMIT %s
+            """, (user_id, limit))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'user_id': result[0],
+                    'last_login': str(result[1]) if result[1] else None
+                }
+            
+            return None
+    
+    except Exception as e:
+        print(f"Error al obtener historial: {e}")
+        return None
+
+# ==================== USO EN admin.py ====================
+"""
+Para usar estos métodos en tu admin.py, agrega esto después de autenticarte:
+
+# En lugar de consultar directamente
+user = get_user_from_db(db, username)
+if user and verify_password(password, user['password_hash']):
+    # Puedes hacer esto:
+    user = db.authenticate_user(username, password_hash)
+    
+# Para registrar un usuario
+success, message = db.register_new_user(username, email, name, password_hash)
+
+# Para obtener un usuario
+user = db.get_user_by_username(username)
+
+# Para cambiar contraseña
+success, message = db.update_user_password(user_id, new_password_hash)
+
+# Para obtener todos los usuarios
+all_users = db.get_all_users()
+
+# Para eliminar un usuario
+success, message = db.delete_user(user_id)
+"""
