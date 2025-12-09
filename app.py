@@ -816,9 +816,9 @@ def render_upload_payment():
         
         if st.button("✅ Validar Pago", use_container_width=True, key="validate_payment"):
             with st.spinner("⏳ Validando pago con Mercado Pago..."):
-                 # Obtener Access Token desde secrets
+                 # Obtener Access Token desde env
                 try:
-                    access_token = st.secrets["mercadopago"]["ACCESS_TOKEN"]
+                    access_token = os.getenv("MERCADOPAGO_ACCESS_TOKEN")
                 except (KeyError, TypeError):
                     st.error("❌ Token de Mercado Pago no configurado. Contacta con soporte.")
                     return
