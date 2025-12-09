@@ -249,7 +249,7 @@ def create_mercadopago_preference(booking_data):
     
     # ⚠️ IMPORTANTE: Reemplaza esto con tu Access Token real
     # Obtén tu token en: https://www.mercadopago.com/developers/panel/credentials
-    ACCESS_TOKEN = st.secrets["mercadopago"]["ACCESS_TOKEN"]
+    ACCESS_TOKEN = os.getenv("MERCADOPAGO_ACCESS_TOKEN")
     
     # Validar que el token sea válido
     if ACCESS_TOKEN == "ACCESS_TOKEN":
