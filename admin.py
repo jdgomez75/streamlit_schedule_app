@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime, timedelta
 from src.database import Database
+import pandas as pd
 
 
 def _row_to_dict(cursor, row):
@@ -9,8 +10,6 @@ def _row_to_dict(cursor, row):
         return row
     columns = [desc[0] for desc in cursor.description]
     return dict(zip(columns, row))
-
-import pandas as pd
 
 # Configuración de la página
 st.set_page_config(
@@ -935,7 +934,7 @@ elif view_mode == "⚙️ Configuración":
                             cursor = conn.cursor()
                             cursor.execute('''
                                 INSERT INTO professionals (name, specialization, phone, email, active)
-                                VALUES (?, ?, ?, ?, ?)
+                                VALUES (%s, %s, %s, %s, %s)
                             ''', (new_name, new_specialization, new_phone, new_email, new_active))
                             conn.commit()
                         st.success("✅ Profesional creado exitosamente")
@@ -996,8 +995,8 @@ elif view_mode == "⚙️ Configuración":
                                 cursor = conn.cursor()
                                 cursor.execute('''
                                     UPDATE professionals 
-                                    SET name=?, specialization=?, phone=?, email=?, active=?
-                                    WHERE id=?
+                                    SET name=%s, specialization=%s, phone=%s, email=%s, active=%s
+                                    WHERE id=%s
                                 ''', (edit_name, edit_specialization, edit_phone, edit_email, edit_active, prof['id']))
                                 conn.commit()
                             st.success("✅ Cambios guardados")
@@ -1070,7 +1069,7 @@ elif view_mode == "⚙️ Configuración":
                             cursor = conn.cursor()
                             cursor.execute('''
                                 INSERT INTO services (name, duration, price, deposit, category, description, active)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
                             ''', (new_svc_name, new_svc_duration, new_svc_price, new_svc_deposit, new_svc_category, new_svc_description, new_svc_active))
                             conn.commit()
                         st.success("✅ Servicio creado exitosamente")
@@ -1187,7 +1186,7 @@ elif view_mode == "⚙️ Configuración":
                                     # Agregar servicio
                                     cursor.execute('''
                                         INSERT INTO professional_services (professional_id, service_id)
-                                        VALUES (?, ?)
+                                        VALUES (%s, %s)
                                     ''', (selected_prof, svc['id']))
                                     st.success(f"✅ {svc['name']} asignado")
                                 else:
