@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Bella Clinic - Reservas",
+    page_title="Rubí Mata Salón - Reservas",
     page_icon="✨",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -225,7 +225,7 @@ def send_webhook_to_n8n(booking_data):
     try:
         response = requests.post(webhook_url, json=booking_data, timeout=10)
         if response.status_code == 200:
-            st.success("✅ Confirmación enviada por WhatsApp")
+            st.success("✅ Confirmación enviada")
         return response.status_code == 200
     except Exception as e:
         st.warning(f"⚠️ No se pudo enviar notificación: {str(e)}")
@@ -638,15 +638,15 @@ def render_checkout():
                 'end_time': st.session_state.selected_slot['end_time'],
                 'duration': st.session_state.selected_slot['duration']
             },
-            'services': [{'name': s['name'], 'price': s['price']} for s in st.session_state.cart],
+            'services': [{'name': s['name'], 'price': float(s['price'])} for s in st.session_state.cart],
             'professional': {
                 'id': prof['id'],
                 'name': prof['name']
             },
             'payment': {
-                'total': total,
-                'deposit': deposit,
-                'remaining': total - deposit
+                'total': float(total),
+                'deposit': float(deposit),
+                'remaining': float(total - deposit)
             }
         }
         
