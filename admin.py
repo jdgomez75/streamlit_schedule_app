@@ -13,7 +13,7 @@ def _row_to_dict(cursor, row):
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Admin - Bella Clinic",
+    page_title="Admin - Rubí Mata Salón",
     page_icon="👑",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1582,6 +1582,6 @@ elif view_mode == "⚙️ Configuración":
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #6B7280; font-size: 0.9rem;'>
-    <p>👑 Panel de Administración - Bella Clinic | Hecho con 💖 por tu equipo</p>
+    <p>👑 Panel de Administración - Rubí Mata Salón | Hecho con 💖 por tu equipo</p>
 </div>
 """, unsafe_allow_html=True)

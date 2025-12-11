@@ -324,7 +324,7 @@ def render_home():
     """Página de inicio"""
     st.markdown("""
     <div class='clinic-header'>
-        <h1>✨ Bella Clinic</h1>
+        <h1>✨ Rubí Mata Salón</h1>
         <p style='font-size: 1.1rem; color: #666;'>
             Tu clínica de belleza integral. Reserva tu cita ahora.
         </p>
