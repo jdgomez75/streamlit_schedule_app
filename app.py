@@ -471,6 +471,24 @@ def render_cart():
 
 def render_calendar():
     """Vista de selección de fecha y hora"""
+    # Agregar CSS para mejorar responsive
+    st.markdown("""
+    <style>
+    @media (max-width: 640px) {
+        [data-testid="column"] {
+            flex-basis: 100% !important;
+            width: 100% !important;
+        }
+    }
+    @media (min-width: 641px) and (max-width: 1024px) {
+        [data-testid="column"] {
+            flex-basis: calc(50% - 0.5rem) !important;
+            width: calc(50% - 0.5rem) !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     if st.button("← Volver", key="back_to_cart"):
         st.session_state.current_view = 'cart'
         st.rerun()
@@ -482,21 +500,25 @@ def render_calendar():
     dates = [today + timedelta(days=i) for i in range(1, 30)]
     
     st.markdown("### Fechas disponibles")
-    cols = st.columns(3)
     
-    for idx, date in enumerate(dates[:9]):
-        weekday = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'][date.weekday()]
-        date_info = {
-            'date': str(date),
-            'day': date.strftime('%d/%m'),
-            'weekday': weekday
-        }
-        
-        with cols[idx % 3]:
-            if st.button(f"**{date_info['day']}**\n\n{date_info['weekday']}", 
-                        key=f"date_{date_info['date']}", use_container_width=True):
-                st.session_state.selected_date = date_info
-                st.rerun()
+    # Crear grid de 3x3 manualmente
+    date_grid = [dates[i:i+3] for i in range(0, min(9, len(dates)), 3)]
+    
+    for row in date_grid:
+        cols = st.columns(3)
+        for col_idx, date in enumerate(row):
+            weekday = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'][date.weekday()]
+            date_info = {
+                'date': str(date),
+                'day': date.strftime('%d/%m'),
+                'weekday': weekday
+            }
+            
+            with cols[col_idx]:
+                if st.button(f"**{date_info['day']}**\n\n{date_info['weekday']}", 
+                            key=f"date_{date_info['date']}", use_container_width=True):
+                    st.session_state.selected_date = date_info
+                    st.rerun()
     
     if st.session_state.selected_date:
         st.markdown(f"### Horarios disponibles para {st.session_state.selected_date['day']}")
@@ -509,27 +531,31 @@ def render_calendar():
         if not slots:
             st.warning("⚠️ No hay horarios disponibles para esta fecha con estos servicios.")
         else:
-            cols = st.columns(3)
-            for idx, slot in enumerate(slots[:9]):
-                with cols[idx % 3]:
-                    prof_name = slot['professionals'][0]['name']
-                    button_key = f"slot_{idx}_{slot['start_time']}"
-                    if st.button(
-                        f"**{slot['start_time']} - {slot['end_time']}**\n\n👤 {prof_name}", 
-                        key=button_key,
-                        use_container_width=True
-                    ):
-                        st.session_state.selected_slot = {
-                            'start_time': slot['start_time'],
-                            'end_time': slot['end_time'],
-                            'duration': slot['duration'],
-                            'type': slot['type'],
-                            'professionals': slot['professionals'],
-                            'description': slot.get('description', '')
-                        }
-                        st.session_state.current_view = 'checkout'
-                        st.rerun()
-
+            # Crear grid de horarios 3x3
+            slot_grid = [slots[i:i+3] for i in range(0, min(9, len(slots)), 3)]
+            
+            for row in slot_grid:
+                cols = st.columns(3)
+                for col_idx, slot in enumerate(row):
+                    with cols[col_idx]:
+                        prof_name = slot['professionals'][0]['name']
+                        button_key = f"slot_{col_idx}_{slot['start_time']}"
+                        if st.button(
+                            f"**{slot['start_time']} - {slot['end_time']}**\n\n👤 {prof_name}", 
+                            key=button_key,
+                            use_container_width=True
+                        ):
+                            st.session_state.selected_slot = {
+                                'start_time': slot['start_time'],
+                                'end_time': slot['end_time'],
+                                'duration': slot['duration'],
+                                'type': slot['type'],
+                                'professionals': slot['professionals'],
+                                'description': slot.get('description', '')
+                            }
+                            st.session_state.current_view = 'checkout'
+                            st.rerun()
+                            
 def render_checkout():
     """Vista de checkout y pago"""
     if st.button("← Volver", key="back_to_calendar"):
