@@ -1,15 +1,59 @@
 import streamlit as st
-from datetime import datetime, timedelta
-from src.database import Database
 import pandas as pd
+import numpy as np
+import streamlit_authenticator as stauth
+import bcrypt
+import yaml
+from yaml.loader import SafeLoader
+from src.database import Database
+from datetime import datetime, timedelta
+from decimal import Decimal
 
+def convert_to_native(obj):
+    """Convierte CUALQUIER tipo a tipos nativos Python"""
+    if obj is None:
+        return None
+    if isinstance(obj, np.ndarray):
+        if obj.size == 1:
+            return convert_to_native(obj.item())
+        else:
+            return obj.tolist()
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, (list, tuple)):
+        return [convert_to_native(item) for item in obj]
+    if isinstance(obj, dict):
+        return {k: convert_to_native(v) for k, v in obj.items()}
+    return str(obj)
 
 def _row_to_dict(cursor, row):
-    """Convierte una fila de PostgreSQL a diccionario"""
+    """Convierte una fila de PostgreSQL a diccionario, manejando tipos problemáticos."""
     if isinstance(row, dict):
         return row
+        
     columns = [desc[0] for desc in cursor.description]
-    return dict(zip(columns, row))
+    data_dict = dict(zip(columns, row))
+    
+    # NUEVA LÓGICA: Iterar y convertir tipos problemáticos
+    for key, value in data_dict.items():
+        if isinstance(value, Decimal):
+            # Convierte Decimal de DB a float nativo de Python
+            data_dict[key] = float(value)
+        elif isinstance(value, (date, time)):
+            # Convierte objetos date/time de DB a string (para evitar conflictos de NumPy)
+            data_dict[key] = str(value)
+        # Puedes añadir más conversiones aquí si es necesario
+        
+    return data_dict
+
 
 # Configuración de la página
 st.set_page_config(
@@ -135,6 +179,67 @@ def init_db():
 
 db = init_db()
 
+# ==================== AUTENTICACIÓN (Adaptación forzada a versión MUY ANTIGUA) ====================
+db = init_db()
+import streamlit_authenticator as stauth # Asegúrate que el import esté aquí o al inicio
+
+try:
+    # 1. Obtener usuarios desde la base de datos
+    usernames_list, hashed_passwords_list, names_list = db.get_all_users_for_auth()
+    
+    # 2. Ensamblar las credenciales en el formato de diccionario ANIDADO
+    credentials = {
+        'usernames': {}
+    }
+    
+    for i, username in enumerate(usernames_list):
+        credentials['usernames'][username] = {
+            # Los nombres de los campos DEBEN coincidir con el código original
+            'email': f'{username}@admin.app', 
+            'name': names_list[i],
+            'password': hashed_passwords_list[i]
+        }
+
+    # 3. Inicializar el autenticador pasándole SOLO el diccionario de credenciales como primer argumento.
+    # En versiones muy antiguas, se acepta un único argumento posicional de diccionario.
+    authenticator = stauth.Authenticate(
+        credentials, # 1er argumento: el diccionario de credenciales
+        'streamlit_auth', # 2do argumento: cookie_name
+        'auth_key',       # 3er argumento: cookie_key
+        30                # 4to argumento: cookie_expiry_days
+    )
+    
+except Exception as e:
+    st.error(f"Error al cargar usuarios para autenticación: {e}")
+    st.info("Asegúrate de que la tabla 'users' exista y los métodos de DB estén correctos.")
+    st.stop()
+# ===========================================================================
+
+
+# ==================== LÓGICA DE INICIO DE SESIÓN (Final) ====================
+
+# Usar la sintaxis posicional simple.
+# El error de Location desaparece con la versión 0.2.2
+name, authentication_status, username = authenticator.login('Login', 'main') 
+
+if authentication_status:
+    # Usuario autenticado exitosamente
+    st.session_state["authentication_status"] = authentication_status
+    st.session_state["name"] = name
+    st.session_state["username"] = username
+    
+elif authentication_status is False:
+    # Credenciales incorrectas
+    st.error('Nombre de usuario/contraseña incorrectos')
+    st.stop()
+    
+elif authentication_status is None:
+    # Esperando Login
+    st.warning('Por favor, ingresa tu nombre de usuario y contraseña')
+    st.stop()
+# =========================================================================
+
+
 # Funciones auxiliares
 def get_status_badge(status):
     """Retorna badge HTML según el estado"""
@@ -258,13 +363,17 @@ with st.sidebar:
     # Acciones rápidas
     st.markdown("### ⚡ Acciones")
     
-    if st.button("🔄 Actualizar", use_container_width=True):
+    if st.button("🔄 Actualizar", width='stretch'):
         st.rerun()
-    
-    if st.button("📥 Exportar a Excel", use_container_width=True):
+    if st.button("🚪 Cerrar Sesión", width='stretch'):
+        authenticator.logout('Logout', 'sidebar') # Usar la sintaxis correcta
+        st.session_state["authentication_status"] = None
+        st.rerun()
+
+    if st.button("📥 Exportar a Excel", width='stretch'):
         st.info("Función próximamente")
     
-    if st.button("📧 Enviar Recordatorios", use_container_width=True):
+    if st.button("📧 Enviar Recordatorios", width='stretch'):
         st.success("Recordatorios enviados")
 
 # ==================== VISTA PRINCIPAL ====================
@@ -346,13 +455,29 @@ if view_mode == "📅 Calendario del Día":
     
     # === NUEVA SECCIÓN: ANÁLISIS DE OCUPACIÓN ===
     st.markdown("### 📊 Análisis de Ocupación")
-    
+
+    # Inicializar variable ✅ IMPORTANTE
+    df_occupation = None
+
     # Calcular ocupación por profesional
     occupation_data = []
     for prof_name, prof_bookings in professionals_data.items():
+        if not prof_bookings:
+            continue
+        
         total_bookings = len(prof_bookings)
         confirmed_bookings = len([b for b in prof_bookings if b['status'] == 'confirmed'])
-        total_revenue = sum(b['total_price'] for b in prof_bookings)
+        
+        # Conversión segura de precios
+        try:
+            prices = []
+            for b in prof_bookings:
+                price = b.get('total_price', 0)
+                prices.append(convert_to_native(price))
+            total_revenue = sum(float(p) if p else 0 for p in prices)
+        except Exception as e:
+            st.error(f"❌ Error procesando precios: {e}")
+            total_revenue = 0
         
         if total_bookings > 0:
             occupation_rate = (confirmed_bookings / total_bookings) * 100
@@ -360,39 +485,56 @@ if view_mode == "📅 Calendario del Día":
             occupation_rate = 0
         
         occupation_data.append({
-            'Profesional': prof_name,
-            'Citas': total_bookings,
-            'Confirmadas': confirmed_bookings,
-            'Ocupación %': occupation_rate,
-            'Ingresos': total_revenue
+            'Profesional': convert_to_native(prof_name),
+            'Citas': convert_to_native(total_bookings),
+            'Confirmadas': convert_to_native(confirmed_bookings),
+            'Ocupación %': convert_to_native(occupation_rate),
+            'Ingresos': convert_to_native(total_revenue)
         })
-    
+
     if occupation_data:
-        # Crear DataFrame para gráficos
-        df_occupation = pd.DataFrame(occupation_data)
+        try:
+            # Convertir lista completa de datos
+            occupation_data_clean = [convert_to_native(row) for row in occupation_data]
+            
+            # Crear DataFrame
+            df_occupation = pd.DataFrame(occupation_data_clean)
+            
+            # Gráfico de ocupación por profesional
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 👥 Citas por Profesional")
+                chart_data = df_occupation.set_index('Profesional')['Citas'].to_dict()
+                st.bar_chart(chart_data)
+            
+            with col2:
+                st.markdown("#### 📈 Tasa de Ocupación (%)")
+                chart_data = df_occupation.set_index('Profesional')['Ocupación %'].to_dict()
+                st.bar_chart(chart_data)
+            
+            st.markdown("---")
+            
+            # Tabla de resumen de ocupación
+            st.markdown("#### 📋 Resumen de Ocupación")
+            st.dataframe(
+                df_occupation.sort_values('Ingresos', ascending=False),
+                width='stretch',
+                hide_index=True
+            )
         
-        # Gráfico de ocupación por profesional
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### 👥 Citas por Profesional")
-            chart_data = df_occupation.set_index('Profesional')['Citas']
-            st.bar_chart(chart_data)
-        
-        with col2:
-            st.markdown("#### 📈 Tasa de Ocupación (%)")
-            chart_data = df_occupation.set_index('Profesional')['Ocupación %']
-            st.bar_chart(chart_data)
-        
-        st.markdown("---")
-        
-        # Tabla de resumen de ocupación
-        st.markdown("#### 📋 Resumen de Ocupación")
-        st.dataframe(
-            df_occupation.sort_values('Ingresos', ascending=False),
-            use_container_width=True,
-            hide_index=True
-        )
+        except Exception as e:
+            st.error(f"❌ Error creando gráficos de ocupación: {e}")
+            st.write("**Detalles del error:**")
+            st.write(str(e))
+            st.write("**Datos problemáticos:**")
+            for i, row in enumerate(occupation_data):
+                st.write(f"Fila {i}: {row}")
+            df_occupation = None
+
+    else:
+        st.info("📊 No hay datos de ocupación para mostrar")
+
     
     # === NUEVA SECCIÓN: HORAS PICO ===
     st.markdown("### ⏰ Análisis de Horas")
@@ -770,7 +912,7 @@ elif view_mode == "💳 Gestión de Pagos":
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button("✅ Validar Pago", use_container_width=True, key=f"validate_{selected_payment['id']}"):
+                    if st.button("✅ Validar Pago", width='stretch', key=f"validate_{selected_payment['id']}"):
                         if operation_number:
                             # Obtener access token
                             try:
@@ -807,7 +949,7 @@ elif view_mode == "💳 Gestión de Pagos":
                             st.error("Por favor ingresa el número de operación")
                 
                 with col2:
-                    if st.button("📝 Registrar Manual", use_container_width=True, key=f"manual_{selected_payment['id']}"):
+                    if st.button("📝 Registrar Manual", width='stretch', key=f"manual_{selected_payment['id']}"):
                         # Registrar pago manual sin validar con MP
                         if amount_paid > 0:
                             st.info(f"Pago de ${amount_paid:,.2f} registrado manualmente")
@@ -817,7 +959,7 @@ elif view_mode == "💳 Gestión de Pagos":
                             st.error("El monto debe ser mayor a 0")
                 
                 with col3:
-                    if st.button("❌ Cancelar", use_container_width=True, key=f"cancel_{selected_payment['id']}"):
+                    if st.button("❌ Cancelar", width='stretch', key=f"cancel_{selected_payment['id']}"):
                         st.session_state.show_payment_form = False
                         st.rerun()
     
@@ -851,11 +993,25 @@ elif view_mode == "📈 Reportes":
             ORDER BY b.date
         """, (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
         
-        results = [dict(zip([desc[0] for desc in cursor.description], row)) for row in cursor.fetchall()]
+        results = cursor.fetchall()
+        # Convertir cada fila a diccionario y asegurar tipos
+        results = []
+        for row in cursor.fetchall():
+            row_dict = dict(zip([desc[0] for desc in cursor.description], row))
+            # Convertir Decimal a float si es necesario
+            for key in row_dict:
+                if isinstance(row_dict[key], (Decimal, float)):
+                    row_dict[key] = float(row_dict[key])
+            results.append(row_dict)
     
     if results:
         # Convertir a DataFrame
-        df = pd.DataFrame(results, columns=['Fecha', 'Citas', 'Ingresos', 'Anticipos'])
+        df = pd.DataFrame(results)
+        # Asegurar tipos de datos
+        df['Fecha'] = pd.to_datetime(df['Fecha']).dt.strftime('%Y-%m-%d')
+        df['Citas'] = df['Citas'].astype(int)
+        df['Ingresos'] = df['Ingresos'].astype(float)
+        df['Anticipos'] = df['Anticipos'].astype(float)
         
         # Métricas generales
         col1, col2, col3 = st.columns(3)
@@ -883,7 +1039,7 @@ elif view_mode == "📈 Reportes":
         
         # Tabla detallada
         st.markdown("### 📋 Detalle por Fecha")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width='stretch')
     else:
         st.info("No hay datos para el rango seleccionado")
 
@@ -894,13 +1050,109 @@ elif view_mode == "📈 Reportes":
 elif view_mode == "⚙️ Configuración":
     st.markdown("## ⚙️ Centro de Control - Configuración del Sistema")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab_list = [
+        "🛡️ Gestión de Usuarios", # ⬅️ NUEVA PESTAÑA
         "👥 Profesionales", 
         "💅 Servicios", 
         "🔗 Profesional-Servicio",
         "⏰ Horarios",
         "📋 Respaldo"
-    ])
+    ]
+    tab_objs = st.tabs(tab_list)
+    
+    # Asignar a variables para fácil acceso
+    tab0 = tab_objs[0]
+    tab1 = tab_objs[1]
+    tab2 = tab_objs[2]
+    tab3 = tab_objs[3]
+    tab4 = tab_objs[4]
+    tab5 = tab_objs[5]
+    
+    # ===== TAB 0: GESTIÓN DE USUARIOS =====
+    with tab0:
+        st.markdown("### 🛡️ Gestión de Usuarios")
+        
+        # --- Formulario de nuevo usuario ---
+        with st.expander("➕ Crear Nuevo Usuario"):
+            new_username = st.text_input("Username (Ej: admin)", key="new_user_username")
+            new_user_name = st.text_input("Nombre Completo", key="new_user_name")
+            new_password = st.text_input("Contraseña", type="password", key="new_user_password")
+            
+            if st.button("✅ Guardar Usuario", width='stretch'):
+                if new_username and new_user_name and new_password:
+                    success, message = db.create_user(new_username, new_password, new_user_name)
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+                else:
+                    st.error("❌ Todos los campos son requeridos")
+        
+        st.markdown("---")
+        
+        # --- Listar y gestionar usuarios ---
+        st.markdown("#### 📋 Usuarios del Sistema")
+        
+        users = db.get_all_users()
+        
+        if users:
+            for user in users:
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    st.markdown(f"**{user['name']}**")
+                    st.caption(f"👤 Username: `{user['username']}` | ID: `{user['id']}`")
+                
+                with col2:
+                    if st.button("🔑", key=f"reset_pass_{user['id']}", help="Cambiar Contraseña"):
+                        st.session_state.show_reset_pass_form = user['id']
+                
+                # Formulario para cambiar contraseña
+                if st.session_state.get('show_reset_pass_form') == user['id']:
+                    st.markdown("##### 🔑 Cambiar Contraseña")
+                    reset_pass = st.text_input("Nueva Contraseña", type="password", key=f"new_pass_{user['id']}")
+                    
+                    col1_r, col2_r = st.columns(2)
+                    
+                    with col1_r:
+                        if st.button("💾 Guardar Contraseña", width='stretch', key=f"save_pass_{user['id']}"):
+                            if reset_pass:
+                                success, message = db.update_password(user['username'], reset_pass)
+                                if success:
+                                    st.success(message)
+                                    st.session_state.show_reset_pass_form = None
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.error("❌ La contraseña no puede estar vacía")
+                    
+                    with col2_r:
+                        # Botón de eliminación
+                        if st.button("🗑️ Eliminar Usuario", width='stretch', key=f"delete_user_{user['id']}"):
+                            st.session_state.confirm_delete_user = user['id']
+
+                        if st.session_state.get('confirm_delete_user') == user['id']:
+                            st.warning(f"⚠️ ¿Eliminar a {user['name']}? Esta acción no se puede deshacer.")
+                            col1_d, col2_d = st.columns(2)
+                            with col1_d:
+                                if st.button("✅ Sí, eliminar", key=f"confirm_del_user_{user['id']}"):
+                                    success, message = db.delete_user(user['id'])
+                                    if success:
+                                        st.success(message)
+                                        st.session_state.confirm_delete_user = None
+                                        st.session_state.show_reset_pass_form = None
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
+                            with col2_d:
+                                if st.button("❌ Cancelar", key=f"cancel_del_user_{user['id']}"):
+                                    st.session_state.confirm_delete_user = None
+                
+                st.markdown("---")
+        else:
+            st.info("No hay usuarios registrados. Crea el primer usuario administrador.")
     
     # ===== TAB 1: PROFESIONALES =====
     with tab1:
@@ -908,7 +1160,7 @@ elif view_mode == "⚙️ Configuración":
         
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("➕ Nuevo Profesional", use_container_width=True):
+            if st.button("➕ Nuevo Profesional", width='stretch'):
                 st.session_state.show_new_professional_form = True
         
         # Formulario para nuevo profesional
@@ -928,7 +1180,7 @@ elif view_mode == "⚙️ Configuración":
             col1, col2, col3 = st.columns([1, 1, 2])
             
             with col1:
-                if st.button("✅ Guardar", use_container_width=True, key="save_new_prof"):
+                if st.button("✅ Guardar", width='stretch', key="save_new_prof"):
                     if new_name and new_specialization:
                         with db.get_connection() as conn:
                             cursor = conn.cursor()
@@ -944,7 +1196,7 @@ elif view_mode == "⚙️ Configuración":
                         st.error("❌ Nombre y Especialización son requeridos")
             
             with col2:
-                if st.button("❌ Cancelar", use_container_width=True, key="cancel_new_prof"):
+                if st.button("❌ Cancelar", width='stretch', key="cancel_new_prof"):
                     st.session_state.show_new_professional_form = False
                     st.rerun()
         
@@ -990,7 +1242,7 @@ elif view_mode == "⚙️ Configuración":
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        if st.button("💾 Guardar", use_container_width=True, key=f"save_edit_{prof['id']}"):
+                        if st.button("💾 Guardar", width='stretch', key=f"save_edit_{prof['id']}"):
                             with db.get_connection() as conn:
                                 cursor = conn.cursor()
                                 cursor.execute('''
@@ -1004,12 +1256,12 @@ elif view_mode == "⚙️ Configuración":
                             st.rerun()
                     
                     with col2:
-                        if st.button("❌ Cancelar", use_container_width=True, key=f"cancel_edit_{prof['id']}"):
+                        if st.button("❌ Cancelar", width='stretch', key=f"cancel_edit_{prof['id']}"):
                             st.session_state.show_edit_prof_form = False
                             st.rerun()
                     
                     with col3:
-                        if st.button("🗑️ Eliminar", use_container_width=True, key=f"delete_prof_{prof['id']}"):
+                        if st.button("🗑️ Eliminar", width='stretch', key=f"delete_prof_{prof['id']}"):
                             st.session_state.confirm_delete_prof = prof['id']
                     
                     # Confirmación de eliminación
@@ -1040,7 +1292,7 @@ elif view_mode == "⚙️ Configuración":
         
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("➕ Nuevo Servicio", use_container_width=True):
+            if st.button("➕ Nuevo Servicio", width='stretch'):
                 st.session_state.show_new_service_form = True
         
         # Formulario para nuevo servicio
@@ -1063,7 +1315,7 @@ elif view_mode == "⚙️ Configuración":
             col1, col2, col3 = st.columns([1, 1, 2])
             
             with col1:
-                if st.button("✅ Guardar", use_container_width=True, key="save_new_svc"):
+                if st.button("✅ Guardar", width='stretch', key="save_new_svc"):
                     if new_svc_name and new_svc_price:
                         with db.get_connection() as conn:
                             cursor = conn.cursor()
@@ -1079,7 +1331,7 @@ elif view_mode == "⚙️ Configuración":
                         st.error("❌ Nombre y Precio son requeridos")
             
             with col2:
-                if st.button("❌ Cancelar", use_container_width=True, key="cancel_new_svc"):
+                if st.button("❌ Cancelar", width='stretch', key="cancel_new_svc"):
                     st.session_state.show_new_service_form = False
                     st.rerun()
         
@@ -1218,7 +1470,7 @@ elif view_mode == "⚙️ Configuración":
                     matrix_df = pd.DataFrame(matrix_data)
                     st.dataframe(
                         matrix_df.rename(columns={'id': 'ID', 'name': 'Profesional', 'service_count': 'Servicios'}),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True
                     )
     
@@ -1333,7 +1585,7 @@ elif view_mode == "⚙️ Configuración":
                 st.markdown("---")
                 
                 # Botón para crear horarios
-                if st.button("✅ Crear Horarios", use_container_width=True, key="create_schedules_btn"):
+                if st.button("✅ Crear Horarios", width='stretch', key="create_schedules_btn"):
                     if not days_selected:
                         st.error("❌ Selecciona al menos un día de la semana")
                     elif start_date > end_date:
@@ -1452,7 +1704,7 @@ elif view_mode == "⚙️ Configuración":
                     
                     # Botón para eliminar todos los horarios de este período
                     st.markdown("---")
-                    if st.button("🗑️ Eliminar todos los horarios de este período", use_container_width=True):
+                    if st.button("🗑️ Eliminar todos los horarios de este período", width='stretch'):
                         success, message = db.delete_professional_schedules(
                             professional_id=selected_prof_id,
                             start_date=view_start_date.strftime('%Y-%m-%d'),

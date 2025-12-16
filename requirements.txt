@@ -1,23 +1,21 @@
-# Framework principal
-streamlit==1.35.0
+# Core
+streamlit==1.32.0
+pandas==2.1.4
+numpy==1.26.2
 
-# Análisis de datos para reportes
-pandas==2.2.0
+# Database
+psycopg2-binary==2.9.9
 
-# Base de datos
-# SQLite viene incluido con Python, no necesita instalación
+# Security
+bcrypt==4.1.1
+streamlit-authenticator==0.2.2
 
-# Requests para webhooks a n8n y Mercado Pago
+# Payments
+mercadopago==2.3.0
 requests==2.31.0
 
-# Utilidades
-python-dotenv==1.0.0
-
+# Image handling
 Pillow==10.1.0
 
-psycopg2-binary==2.9.9
+# Utilities
 python-dotenv==1.0.0
-
-streamlit-authenticator
-
-mercadopago==2.3.0
