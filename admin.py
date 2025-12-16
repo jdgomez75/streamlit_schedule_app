@@ -363,17 +363,17 @@ with st.sidebar:
     # Acciones rápidas
     st.markdown("### ⚡ Acciones")
     
-    if st.button("🔄 Actualizar", width='stretch'):
+    if st.button("🔄 Actualizar", use_container_width=True):
         st.rerun()
-    if st.button("🚪 Cerrar Sesión", width='stretch'):
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
         authenticator.logout('Logout', 'sidebar') # Usar la sintaxis correcta
         st.session_state["authentication_status"] = None
         st.rerun()
 
-    if st.button("📥 Exportar a Excel", width='stretch'):
+    if st.button("📥 Exportar a Excel", use_container_width=True):
         st.info("Función próximamente")
     
-    if st.button("📧 Enviar Recordatorios", width='stretch'):
+    if st.button("📧 Enviar Recordatorios", use_container_width=True):
         st.success("Recordatorios enviados")
 
 # ==================== VISTA PRINCIPAL ====================
@@ -519,7 +519,7 @@ if view_mode == "📅 Calendario del Día":
             st.markdown("#### 📋 Resumen de Ocupación")
             st.dataframe(
                 df_occupation.sort_values('Ingresos', ascending=False),
-                width='stretch',
+                use_container_width=True,
                 hide_index=True
             )
         
@@ -912,7 +912,7 @@ elif view_mode == "💳 Gestión de Pagos":
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button("✅ Validar Pago", width='stretch', key=f"validate_{selected_payment['id']}"):
+                    if st.button("✅ Validar Pago", use_container_width=True, key=f"validate_{selected_payment['id']}"):
                         if operation_number:
                             # Obtener access token
                             try:
@@ -949,7 +949,7 @@ elif view_mode == "💳 Gestión de Pagos":
                             st.error("Por favor ingresa el número de operación")
                 
                 with col2:
-                    if st.button("📝 Registrar Manual", width='stretch', key=f"manual_{selected_payment['id']}"):
+                    if st.button("📝 Registrar Manual", use_container_width=True, key=f"manual_{selected_payment['id']}"):
                         # Registrar pago manual sin validar con MP
                         if amount_paid > 0:
                             st.info(f"Pago de ${amount_paid:,.2f} registrado manualmente")
@@ -959,7 +959,7 @@ elif view_mode == "💳 Gestión de Pagos":
                             st.error("El monto debe ser mayor a 0")
                 
                 with col3:
-                    if st.button("❌ Cancelar", width='stretch', key=f"cancel_{selected_payment['id']}"):
+                    if st.button("❌ Cancelar", use_container_width=True, key=f"cancel_{selected_payment['id']}"):
                         st.session_state.show_payment_form = False
                         st.rerun()
     
@@ -1039,7 +1039,7 @@ elif view_mode == "📈 Reportes":
         
         # Tabla detallada
         st.markdown("### 📋 Detalle por Fecha")
-        st.dataframe(df, width='stretch')
+        st.dataframe(df, use_container_width=True)
     else:
         st.info("No hay datos para el rango seleccionado")
 
@@ -1078,7 +1078,7 @@ elif view_mode == "⚙️ Configuración":
             new_user_name = st.text_input("Nombre Completo", key="new_user_name")
             new_password = st.text_input("Contraseña", type="password", key="new_user_password")
             
-            if st.button("✅ Guardar Usuario", width='stretch'):
+            if st.button("✅ Guardar Usuario", use_container_width=True):
                 if new_username and new_user_name and new_password:
                     success, message = db.create_user(new_username, new_password, new_user_name)
                     if success:
@@ -1116,7 +1116,7 @@ elif view_mode == "⚙️ Configuración":
                     col1_r, col2_r = st.columns(2)
                     
                     with col1_r:
-                        if st.button("💾 Guardar Contraseña", width='stretch', key=f"save_pass_{user['id']}"):
+                        if st.button("💾 Guardar Contraseña", use_container_width=True, key=f"save_pass_{user['id']}"):
                             if reset_pass:
                                 success, message = db.update_password(user['username'], reset_pass)
                                 if success:
@@ -1130,7 +1130,7 @@ elif view_mode == "⚙️ Configuración":
                     
                     with col2_r:
                         # Botón de eliminación
-                        if st.button("🗑️ Eliminar Usuario", width='stretch', key=f"delete_user_{user['id']}"):
+                        if st.button("🗑️ Eliminar Usuario", use_container_width=True, key=f"delete_user_{user['id']}"):
                             st.session_state.confirm_delete_user = user['id']
 
                         if st.session_state.get('confirm_delete_user') == user['id']:
@@ -1160,7 +1160,7 @@ elif view_mode == "⚙️ Configuración":
         
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("➕ Nuevo Profesional", width='stretch'):
+            if st.button("➕ Nuevo Profesional", use_container_width=True):
                 st.session_state.show_new_professional_form = True
         
         # Formulario para nuevo profesional
@@ -1180,7 +1180,7 @@ elif view_mode == "⚙️ Configuración":
             col1, col2, col3 = st.columns([1, 1, 2])
             
             with col1:
-                if st.button("✅ Guardar", width='stretch', key="save_new_prof"):
+                if st.button("✅ Guardar", use_container_width=True, key="save_new_prof"):
                     if new_name and new_specialization:
                         with db.get_connection() as conn:
                             cursor = conn.cursor()
@@ -1196,7 +1196,7 @@ elif view_mode == "⚙️ Configuración":
                         st.error("❌ Nombre y Especialización son requeridos")
             
             with col2:
-                if st.button("❌ Cancelar", width='stretch', key="cancel_new_prof"):
+                if st.button("❌ Cancelar", use_container_width=True, key="cancel_new_prof"):
                     st.session_state.show_new_professional_form = False
                     st.rerun()
         
@@ -1242,7 +1242,7 @@ elif view_mode == "⚙️ Configuración":
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        if st.button("💾 Guardar", width='stretch', key=f"save_edit_{prof['id']}"):
+                        if st.button("💾 Guardar", use_container_width=True, key=f"save_edit_{prof['id']}"):
                             with db.get_connection() as conn:
                                 cursor = conn.cursor()
                                 cursor.execute('''
@@ -1256,12 +1256,12 @@ elif view_mode == "⚙️ Configuración":
                             st.rerun()
                     
                     with col2:
-                        if st.button("❌ Cancelar", width='stretch', key=f"cancel_edit_{prof['id']}"):
+                        if st.button("❌ Cancelar", use_container_width=True, key=f"cancel_edit_{prof['id']}"):
                             st.session_state.show_edit_prof_form = False
                             st.rerun()
                     
                     with col3:
-                        if st.button("🗑️ Eliminar", width='stretch', key=f"delete_prof_{prof['id']}"):
+                        if st.button("🗑️ Eliminar", use_container_width=True, key=f"delete_prof_{prof['id']}"):
                             st.session_state.confirm_delete_prof = prof['id']
                     
                     # Confirmación de eliminación
@@ -1292,7 +1292,7 @@ elif view_mode == "⚙️ Configuración":
         
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("➕ Nuevo Servicio", width='stretch'):
+            if st.button("➕ Nuevo Servicio", use_container_width=True):
                 st.session_state.show_new_service_form = True
         
         # Formulario para nuevo servicio
@@ -1315,7 +1315,7 @@ elif view_mode == "⚙️ Configuración":
             col1, col2, col3 = st.columns([1, 1, 2])
             
             with col1:
-                if st.button("✅ Guardar", width='stretch', key="save_new_svc"):
+                if st.button("✅ Guardar", use_container_width=True, key="save_new_svc"):
                     if new_svc_name and new_svc_price:
                         with db.get_connection() as conn:
                             cursor = conn.cursor()
@@ -1331,7 +1331,7 @@ elif view_mode == "⚙️ Configuración":
                         st.error("❌ Nombre y Precio son requeridos")
             
             with col2:
-                if st.button("❌ Cancelar", width='stretch', key="cancel_new_svc"):
+                if st.button("❌ Cancelar", use_container_width=True, key="cancel_new_svc"):
                     st.session_state.show_new_service_form = False
                     st.rerun()
         
@@ -1470,7 +1470,7 @@ elif view_mode == "⚙️ Configuración":
                     matrix_df = pd.DataFrame(matrix_data)
                     st.dataframe(
                         matrix_df.rename(columns={'id': 'ID', 'name': 'Profesional', 'service_count': 'Servicios'}),
-                        width='stretch',
+                        use_container_width=True,
                         hide_index=True
                     )
     
@@ -1585,7 +1585,7 @@ elif view_mode == "⚙️ Configuración":
                 st.markdown("---")
                 
                 # Botón para crear horarios
-                if st.button("✅ Crear Horarios", width='stretch', key="create_schedules_btn"):
+                if st.button("✅ Crear Horarios", use_container_width=True, key="create_schedules_btn"):
                     if not days_selected:
                         st.error("❌ Selecciona al menos un día de la semana")
                     elif start_date > end_date:
@@ -1704,7 +1704,7 @@ elif view_mode == "⚙️ Configuración":
                     
                     # Botón para eliminar todos los horarios de este período
                     st.markdown("---")
-                    if st.button("🗑️ Eliminar todos los horarios de este período", width='stretch'):
+                    if st.button("🗑️ Eliminar todos los horarios de este período", use_container_width=True):
                         success, message = db.delete_professional_schedules(
                             professional_id=selected_prof_id,
                             start_date=view_start_date.strftime('%Y-%m-%d'),
