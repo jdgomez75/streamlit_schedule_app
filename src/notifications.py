@@ -454,3 +454,73 @@ def enviar_confirmacion_cambio(client_name, client_email, booking_code, new_date
     except Exception as e:
         print(f"❌ Error al enviar correo: {e}")
         return False
+
+
+def enviar_recordatorio_cita(booking_data):
+    """
+    Envía recordatorio de cita para MAÑANA
+    """
+    cliente = booking_data['client']
+    cita = booking_data['appointment']
+    codigo = booking_data['booking_code']
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }}
+            .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; }}
+            .header {{ background: linear-gradient(135deg, #FFA500 0%, #FF6B6B 100%); color: white; padding: 20px; text-align: center; }}
+            .content {{ padding: 20px; }}
+            .box {{ background: #fff3cd; border-left: 4px solid #FFA500; padding: 15px; margin: 20px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🔔 Recordatorio de Cita</h1>
+            </div>
+            <div class="content">
+                <p>Hola <strong>{cliente.get('name')}</strong>,</p>
+                
+                <div class="box">
+                    <h3>Tu cita es MAÑANA</h3>
+                    <p><strong>Fecha:</strong> {cita['date']}</p>
+                    <p><strong>Hora:</strong> {cita['start_time']}</p>
+                    <p><strong>Código:</strong> {codigo}</p>
+                    <p>Por favor, llega 10 minutos antes.</p>
+                </div>
+                
+                <p>Si necesitas cancelar o cambiar, contactanos.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    remitente = os.getenv("GMAIL_USER")
+    contraseña = os.getenv("GMAIL_PASSWORD")
+    destinatario = cliente.get('email', '')
+    
+    if not destinatario:
+        return False
+    
+    msg = MIMEMultipart("alternative")
+    msg['From'] = remitente
+    msg['To'] = destinatario
+    msg['Subject'] = f"🔔 Recordatorio: Cita mañana a las {cita['start_time']}"
+    msg.attach(MIMEText(html_content, 'html'))
+    
+    try:
+        servidor = smtplib.SMTP('smtp.gmail.com', 587)
+        servidor.starttls()
+        servidor.login(remitente, contraseña)
+        servidor.send_message(msg)
+        servidor.quit()
+        print(f"✅ Recordatorio enviado a {destinatario}")
+        return True
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return False

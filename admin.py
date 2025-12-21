@@ -7,6 +7,7 @@ import yaml
 from yaml.loader import SafeLoader
 from src.database import Database
 from datetime import datetime, timedelta
+from io import BytesIO
 from decimal import Decimal
 
 def convert_to_native(obj):
@@ -301,6 +302,296 @@ def get_payment_badge_from_amounts(total_price, deposit_paid):
     else:
         return '<span class="badge badge-paid">💰 Anticipo pagado</span>'
 
+# ============================================
+# FUNCIÓN 1: Exportar Citas a Excel
+# ============================================
+#
+# Agregar esta función DESPUÉS de las vistas (antes de main())
+
+def export_bookings_to_excel():
+    """
+    Exporta citas del mes actual a Excel con información completa
+    
+    Estructura:
+    - Obtiene bookings con relaciones (clientes, profesionales, servicios, pagos)
+    - Cálcula monto pendiente (total - depósito pagado)
+    - Formatea moneda, fechas y horas
+    - Aplica estilos y colores por estado
+    """
+    try:
+        from datetime import datetime
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        
+        # Obtener citas del mes actual CON TODAS LAS RELACIONES
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # QUERY COMPLETA - Une todas las relaciones
+            cursor.execute('''
+                SELECT 
+                    b.booking_code as "Código Cita",
+                    b.client_name as "Cliente",
+                    b.client_phone as "Teléfono",
+                    b.client_email as "Email",
+                    b.date as "Fecha",
+                    b.start_time as "Hora Inicio",
+                    b.end_time as "Hora Fin",
+                    COALESCE(p.name, 'Sin asignar') as "Profesional",
+                    STRING_AGG(DISTINCT s.name, ', ') as "Servicios",
+                    STRING_AGG(DISTINCT c.name, ', ') as "Categoría",
+                    b.total_price as "Total",
+                    b.deposit_paid as "Depósito Pagado",
+                    (b.total_price - b.deposit_paid) as "Pendiente",
+                    COALESCE(pay.amount, 0) as "Monto Pagado",
+                    COALESCE(pay.payment_status, '-') as "Estado Pago",
+                    b.status as "Estado Cita"
+                FROM bookings b
+                LEFT JOIN professionals p ON b.professional_id = p.id
+                LEFT JOIN booking_services bs ON b.id = bs.booking_id
+                LEFT JOIN services s ON bs.service_id = s.id
+                LEFT JOIN categories c ON s.category_id = c.id
+                LEFT JOIN payments pay ON b.booking_code = pay.booking_code
+                WHERE DATE_TRUNC('month', b.date::timestamp) = DATE_TRUNC('month', CURRENT_DATE)
+                GROUP BY b.id, p.id, p.name, pay.id, pay.amount, pay.payment_status
+                ORDER BY b.date DESC, b.start_time ASC
+            ''')
+            
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+        
+        if not rows:
+            st.warning("📭 No hay citas para exportar este mes")
+            return None
+        
+        # Crear DataFrame
+        df = pd.DataFrame(rows, columns=columns)
+        
+        # ========== FORMATEO DE DATOS ==========
+        
+        # Fecha: convertir a formato YYYY-MM-DD
+        df['Fecha'] = pd.to_datetime(df['Fecha']).dt.strftime('%Y-%m-%d')
+        
+        # Horas: convertir a string HH:MM:SS
+        df['Hora Inicio'] = df['Hora Inicio'].astype(str)
+        df['Hora Fin'] = df['Hora Fin'].astype(str)
+        
+        # Moneda: formatear con $ y 2 decimales
+        df['Total'] = df['Total'].astype(float).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        df['Depósito Pagado'] = df['Depósito Pagado'].astype(float).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        df['Pendiente'] = df['Pendiente'].astype(float).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        df['Monto Pagado'] = df['Monto Pagado'].astype(float).apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+        
+        # Estado: capitalizar
+        df['Estado Cita'] = df['Estado Cita'].str.capitalize()
+        df['Estado Pago'] = df['Estado Pago'].str.capitalize()
+        
+        # Crear Excel en memoria
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Citas Mes', index=False)
+            
+            workbook = writer.book
+            worksheet = writer.sheets['Citas Mes']
+            
+            # ===== ESTILOS =====
+            
+            # Bordes finos
+            thin_border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            
+            # Color de encabezado (pink)
+            header_fill = PatternFill(start_color="EC4899", end_color="EC4899", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF", size=11)
+            header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
+            # Aplicar estilos al encabezado
+            for cell in worksheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = header_alignment
+                cell.border = thin_border
+            
+            # Altura del encabezado
+            worksheet.row_dimensions[1].height = 30
+            
+            # ===== APLICAR FORMATO A DATOS =====
+            
+            for row_idx, row in enumerate(worksheet.iter_rows(min_row=2, max_row=worksheet.max_row), start=2):
+                
+                # Obtener estado de la cita (última columna)
+                status_cell = row[-2]  # Estado Cita es penúltima columna
+                status_value = str(status_cell.value).lower() if status_cell.value else ""
+                
+                # Color de fondo según estado
+                if 'confirmed' in status_value:
+                    row_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")  # Verde
+                elif 'pending' in status_value:
+                    row_fill = PatternFill(start_color="FEF08A", end_color="FEF08A", fill_type="solid")  # Amarillo
+                elif 'cancelled' in status_value:
+                    row_fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")  # Rojo
+                else:
+                    row_fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")  # Gris
+                
+                # Aplicar a cada celda
+                for cell in row:
+                    cell.fill = row_fill
+                    cell.border = thin_border
+                    cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            
+            # ===== AJUSTAR ANCHO DE COLUMNAS =====
+            
+            column_widths = {
+                'A': 18,  # Código Cita
+                'B': 20,  # Cliente
+                'C': 14,  # Teléfono
+                'D': 25,  # Email
+                'E': 12,  # Fecha
+                'F': 12,  # Hora Inicio
+                'G': 12,  # Hora Fin
+                'H': 18,  # Profesional
+                'I': 30,  # Servicios
+                'J': 20,  # Categoría
+                'K': 12,  # Total
+                'L': 15,  # Depósito Pagado
+                'M': 14,  # Pendiente
+                'N': 14,  # Monto Pagado
+                'O': 15,  # Estado Pago
+                'P': 14,  # Estado Cita
+            }
+            
+            for col_letter, width in column_widths.items():
+                worksheet.column_dimensions[col_letter].width = width
+            
+            # ===== CONGELAR ENCABEZADO =====
+            worksheet.freeze_panes = 'A2'
+        
+        output.seek(0)
+        print(f"✅ Excel generado: {len(rows)} citas exportadas")
+        return output.getvalue()
+        
+    except Exception as e:
+        print(f"❌ Error exportando Excel: {e}")
+        import traceback
+        traceback.print_exc()
+        st.error(f"Error al generar Excel: {str(e)}")
+        return None
+
+
+
+
+# ============================================
+# FUNCIÓN 2: Enviar Recordatorios
+# ============================================
+#
+# Agregar esta función DESPUÉS de export_bookings_to_excel()
+
+def send_appointment_reminders():
+    """
+    Envía recordatorios de citas para MAÑANA
+    
+    Estructura de query:
+    - bookings: date (DATE), start_time (TIME), end_time (TIME)
+    - professionals: name (VARCHAR)
+    - Filtra por: status NOT IN ('cancelled', 'completed')
+    
+    Retorna: cantidad de recordatorios enviados, o -1 si hay error
+    """
+    try:
+        from src import notifications
+        from datetime import datetime, timedelta
+        
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        
+        print(f"📅 Enviando recordatorios para: {tomorrow}")
+        
+        # Obtener citas de mañana
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # QUERY CORREGIDA
+            cursor.execute('''
+                SELECT 
+                    b.id,
+                    b.booking_code,
+                    b.client_name,
+                    b.client_email,
+                    b.date,
+                    b.start_time,
+                    b.end_time,
+                    COALESCE(p.name, 'Sin asignar') as professional_name
+                FROM bookings b
+                LEFT JOIN professionals p ON b.professional_id = p.id
+                WHERE b.date = %s
+                AND b.status NOT IN ('cancelled', 'completed')
+                ORDER BY b.start_time ASC
+            ''', (tomorrow,))
+            
+            bookings = cursor.fetchall()
+            print(f"🔍 {len(bookings)} citas encontradas para mañana")
+        
+        if not bookings:
+            print("ℹ️ No hay citas para mañana")
+            return 0
+        
+        # Enviar recordatorio a cada cliente
+        sent_count = 0
+        failed_count = 0
+        
+        for booking in bookings:
+            booking_id, code, name, email, date, start_time, end_time, prof_name = booking
+            
+            try:
+                # Validar email
+                if not email or not email.strip():
+                    print(f"⚠️ Email vacío para cita {code}")
+                    failed_count += 1
+                    continue
+                
+                # Preparar datos para el email
+                booking_data = {
+                    'client': {
+                        'name': name,
+                        'email': email
+                    },
+                    'appointment': {
+                        'date': str(date),
+                        'start_time': str(start_time),
+                        'end_time': str(end_time)
+                    },
+                    'booking_code': code,
+                    'professional': {
+                        'name': prof_name or 'Profesional'
+                    }
+                }
+                
+                # Enviar email
+                success = notifications.enviar_recordatorio_cita(booking_data)
+                
+                if success:
+                    sent_count += 1
+                    print(f"✅ Recordatorio enviado a {email} (Cita: {code})")
+                else:
+                    failed_count += 1
+                    print(f"⚠️ Error enviando a {email} (Cita: {code})")
+                    
+            except Exception as e:
+                failed_count += 1
+                print(f"⚠️ Excepción en {email}: {str(e)}")
+        
+        print(f"📊 Resultado: {sent_count} enviados, {failed_count} fallidos")
+        return sent_count
+        
+    except Exception as e:
+        print(f"❌ Error en send_appointment_reminders: {e}")
+        import traceback
+        traceback.print_exc()
+        st.error(f"Error enviando recordatorios: {str(e)}")
+        return -1
+
 # ==================== SIDEBAR ====================
 
 with st.sidebar:
@@ -360,21 +651,63 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Acciones rápidas
     st.markdown("### ⚡ Acciones")
+    st.markdown("---")
     
-    if st.button("🔄 Actualizar", width='stretch'):
+    # BOTÓN 1: Actualizar
+    if st.button("🔄 Actualizar", use_container_width=True, key="btn_refresh"):
+        st.cache_data.clear()
         st.rerun()
-    if st.button("🚪 Cerrar Sesión", width='stretch'):
-        authenticator.logout('Logout', 'sidebar') # Usar la sintaxis correcta
-        st.session_state["authentication_status"] = None
+    
+    # BOTÓN 2: Exportar a Excel
+    if st.button("📥 Exportar a Excel", use_container_width=True, key="btn_export"):
+        st.session_state.current_action = 'export_excel'
         st.rerun()
+    
+    # BOTÓN 3: Enviar Recordatorios
+    if st.button("📧 Enviar Recordatorios", use_container_width=True, key="btn_reminders"):
+        st.session_state.current_action = 'send_reminders'
+        st.rerun()
+    
+    # BOTÓN 4: Cerrar Sesión
+    if st.button("🚪 Cerrar Sesión", use_container_width=True, key="btn_logout"):
+        st.session_state.clear()
+        st.info("✅ Sesión cerrada. Recargando...")
+        st.rerun()
+    
+    # ========== PROCESAR ACCIONES ==========
+    
+    # Exportar a Excel
+    if st.session_state.get('current_action') == 'export_excel':
+        with st.spinner("⏳ Generando Excel..."):
+            excel_buffer = export_bookings_to_excel()
+            if excel_buffer:
+                st.download_button(
+                    label="💾 Descargar Excel",
+                    data=excel_buffer,
+                    file_name=f"citas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="download_excel"
+                )
+                st.success("✅ Excel generado exitosamente")
+                st.session_state.current_action = None
+            else:
+                st.error("❌ Error generando Excel")
+                st.session_state.current_action = None
+    
+    # Enviar Recordatorios
+    if st.session_state.get('current_action') == 'send_reminders':
+        with st.spinner("⏳ Enviando recordatorios..."):
+            sent_count = send_appointment_reminders()
+            if sent_count > 0:
+                st.success(f"✅ {sent_count} recordatorios enviados correctamente")
+            elif sent_count == 0:
+                st.info("ℹ️ No hay citas para recordar mañana")
+            else:
+                st.error("❌ Error enviando recordatorios")
+            st.session_state.current_action = None
 
-    if st.button("📥 Exportar a Excel", width='stretch'):
-        st.info("Función próximamente")
-    
-    if st.button("📧 Enviar Recordatorios", width='stretch'):
-        st.success("Recordatorios enviados")
 
 # ==================== VISTA PRINCIPAL ====================
 
