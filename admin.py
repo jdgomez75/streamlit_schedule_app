@@ -769,9 +769,9 @@ elif view_mode == "💳 Gestión de Pagos":
         
         # Filtro por estado de pago
         if payment_status_filter == "Pendiente":
-            query += " AND b.deposit_paid <= 0"
+            query += " AND b.status = 'pending'"
         elif payment_status_filter == "Anticipo Pagado":
-            query += " AND b.deposit_paid > 0 AND b.deposit_paid < b.total_price"
+            query += " AND b.status = 'confirmed'"
         elif payment_status_filter == "Pagado Completo":
             query += " AND b.deposit_paid >= b.total_price"
         
@@ -993,7 +993,7 @@ elif view_mode == "📈 Reportes":
             ORDER BY b.date
         """, (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
         
-        results = cursor.fetchall()
+        #results = cursor.fetchall()
         # Convertir cada fila a diccionario y asegurar tipos
         results = []
         for row in cursor.fetchall():
@@ -1007,6 +1007,15 @@ elif view_mode == "📈 Reportes":
     if results:
         # Convertir a DataFrame
         df = pd.DataFrame(results)
+        
+        # Renombrar columnas
+        df.rename(columns={
+            'booking_date': 'Fecha',
+            'total_bookings': 'Citas',
+            'total_revenue': 'Ingresos',
+            'deposits_collected': 'Anticipos'
+        }, inplace=True)
+        
         # Asegurar tipos de datos
         df['Fecha'] = pd.to_datetime(df['Fecha']).dt.strftime('%Y-%m-%d')
         df['Citas'] = df['Citas'].astype(int)
@@ -1039,7 +1048,7 @@ elif view_mode == "📈 Reportes":
         
         # Tabla detallada
         st.markdown("### 📋 Detalle por Fecha")
-        st.dataframe(df, width='stretch')
+        st.dataframe(df, use_container_width=True)
     else:
         st.info("No hay datos para el rango seleccionado")
 
@@ -1287,92 +1296,506 @@ elif view_mode == "⚙️ Configuración":
             st.info("No hay profesionales registrados. Crea uno para comenzar.")
     
     # ===== TAB 2: SERVICIOS =====
+    # ============================================
+# REEMPLAZAR en admin.py: Sección de Gestión de Servicios
+# ============================================
+
+# ===== TAB 2: SERVICIOS (ACTUALIZADA) =====
     with tab2:
-        st.markdown("### 💅 Gestión de Servicios")
+        st.markdown("### 🧴 Gestión de Servicios")
         
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            if st.button("➕ Nuevo Servicio", width='stretch'):
-                st.session_state.show_new_service_form = True
+        service_mode = st.radio(
+            "Elige una opción",
+            ["➕ Agregar Servicio", "✏️ Editar Servicio", "📋 Ver Servicios", "🔧 Gestionar Categorías"],
+            horizontal=True,
+            key="service_mode"
+        )
         
-        # Formulario para nuevo servicio
-        if st.session_state.get('show_new_service_form', False):
-            st.markdown("#### ➕ Agregar Nuevo Servicio")
+        # ===== MODO 1: AGREGAR SERVICIO =====
+        if service_mode == "➕ Agregar Servicio":
+            st.markdown("#### ➕ Nuevo Servicio")
             
-            col1, col2 = st.columns(2)
+            # PASO 1: Seleccionar o crear categoría
+            st.markdown("**Paso 1: Categoría**")
+            
+            existing_categories = db.get_active_categories()
+            category_options = {cat['name']: cat['id'] for cat in existing_categories}
+            
+            col1, col2 = st.columns([3, 1])
+            
             with col1:
-                new_svc_name = st.text_input("Nombre del Servicio", key="new_svc_name")
-                new_svc_duration = st.number_input("Duración (minutos)", min_value=5, value=30, step=5, key="new_svc_duration")
-                new_svc_price = st.number_input("Precio ($)", min_value=0.0, value=0.0, step=10.0, key="new_svc_price")
+                selected_category_name = st.selectbox(
+                    "Selecciona una categoría existente",
+                    options=list(category_options.keys()),
+                    key="select_category"
+                )
+                selected_category_id = category_options[selected_category_name]
             
             with col2:
-                new_svc_deposit = st.number_input("Anticipo ($)", min_value=0.0, value=0.0, step=5.0, key="new_svc_deposit")
-                new_svc_category = st.text_input("Categoría", key="new_svc_category", placeholder="Ej: Uñas, Facial, Masajes")
-                new_svc_active = st.checkbox("Activo", value=True, key="new_svc_active")
+                if st.button("➕ Nueva Categoría", key="new_category_btn"):
+                    st.session_state.show_new_category = True
             
-            new_svc_description = st.text_area("Descripción", key="new_svc_description", height=60)
+            # Formulario para nueva categoría (si se activa)
+            if st.session_state.get('show_new_category', False):
+                st.markdown("---")
+                st.markdown("**Crear Nueva Categoría**")
+                
+                new_cat_col1, new_cat_col2, new_cat_col3 = st.columns(3)
+                
+                with new_cat_col1:
+                    new_category_name = st.text_input(
+                        "Nombre de la categoría",
+                        placeholder="ej: Uñas",
+                        key="new_cat_name"
+                    )
+                
+                with new_cat_col2:
+                    new_category_icon = st.selectbox(
+                        "Ícono",
+                        ["💅", "💇", "💆", "✨", "🎨", "🪮", "📋", "💄"],
+                        key="new_cat_icon"
+                    )
+                
+                with new_cat_col3:
+                    new_category_color = st.color_picker(
+                        "Color",
+                        value="#EC4899",
+                        key="new_cat_color"
+                    )
+                
+                new_category_desc = st.text_area(
+                    "Descripción (opcional)",
+                    placeholder="Describe los servicios en esta categoría",
+                    key="new_cat_desc"
+                )
+                
+                col_create, col_cancel = st.columns(2)
+                
+                with col_create:
+                    if st.button("✅ Crear Categoría", key="create_cat_btn"):
+                        success, message, cat_id = db.create_category(
+                            name=new_category_name,
+                            description=new_category_desc,
+                            icon=new_category_icon,
+                            color=new_category_color
+                        )
+                        
+                        if success:
+                            st.success(message)
+                            st.session_state.show_new_category = False
+                            selected_category_id = cat_id
+                            st.rerun()
+                        else:
+                            st.error(message)
+                
+                with col_cancel:
+                    if st.button("❌ Cancelar", key="cancel_cat_btn"):
+                        st.session_state.show_new_category = False
+                        st.rerun()
             
-            col1, col2, col3 = st.columns([1, 1, 2])
+            # PASO 2: Datos del servicio
+            st.markdown("---")
+            st.markdown("**Paso 2: Datos del Servicio**")
             
-            with col1:
-                if st.button("✅ Guardar", width='stretch', key="save_new_svc"):
-                    if new_svc_name and new_svc_price:
+            service_col1, service_col2 = st.columns(2)
+            
+            with service_col1:
+                service_name = st.text_input(
+                    "Nombre del servicio",
+                    placeholder="ej: Manicura completa",
+                    key="service_name"
+                )
+                service_duration = st.number_input(
+                    "Duración (minutos)",
+                    min_value=15,
+                    step=15,
+                    value=60,
+                    key="service_duration"
+                )
+                service_price = st.number_input(
+                    "Precio (MXN)",
+                    min_value=0.0,
+                    step=50.0,
+                    value=200.0,
+                    key="service_price"
+                )
+            
+            with service_col2:
+                service_description = st.text_area(
+                    "Descripción",
+                    placeholder="Describe el servicio",
+                    key="service_description"
+                )
+                service_deposit = st.number_input(
+                    "Anticipo requerido (MXN)",
+                    min_value=0.0,
+                    step=50.0,
+                    value=100.0,
+                    key="service_deposit"
+                )
+            
+            # PASO 3: Asignar profesionales
+            st.markdown("---")
+            st.markdown("**Paso 3: Profesionales (Opcional)**")
+            
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, name FROM professionals WHERE active = TRUE ORDER BY name")
+                professionals = [dict(zip([desc[0] for desc in cursor.description], row)) for row in cursor.fetchall()]
+            
+            if professionals:
+                selected_professionals = st.multiselect(
+                    "Selecciona profesionales que pueden realizar este servicio",
+                    options=[p['name'] for p in professionals],
+                    key="service_professionals"
+                )
+                selected_prof_ids = [p['id'] for p in professionals if p['name'] in selected_professionals]
+            else:
+                st.info("ℹ️ No hay profesionales registrados aún")
+                selected_prof_ids = []
+            
+            # BOTÓN CREAR
+            st.markdown("---")
+            if st.button("✅ Crear Servicio", use_container_width=True, type="primary", key="create_service"):
+                if not service_name:
+                    st.error("⚠️ El nombre del servicio es obligatorio")
+                else:
+                    try:
                         with db.get_connection() as conn:
                             cursor = conn.cursor()
-                            cursor.execute('''
-                                INSERT INTO services (name, duration, price, deposit, category, description, active)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                            ''', (new_svc_name, new_svc_duration, new_svc_price, new_svc_deposit, new_svc_category, new_svc_description, new_svc_active))
+                            
+                            # Insertar servicio
+                            cursor.execute("""
+                                INSERT INTO services (name, description, price, duration, category_id, deposit, active)
+                                VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                                RETURNING id
+                            """, (
+                                service_name,
+                                service_description,
+                                service_price,
+                                service_duration,
+                                selected_category_id,
+                                service_deposit
+                            ))
+                            
+                            service_id = cursor.fetchone()[0]
+                            
+                            # Asignar profesionales si los hay
+                            if selected_prof_ids:
+                                for prof_id in selected_prof_ids:
+                                    cursor.execute("""
+                                        INSERT INTO professional_services (professional_id, service_id, active)
+                                        VALUES (%s, %s, TRUE)
+                                    """, (prof_id, service_id))
+                            
                             conn.commit()
-                        st.success("✅ Servicio creado exitosamente")
-                        st.session_state.show_new_service_form = False
+                        
+                        st.success(f"✅ Servicio '{service_name}' creado exitosamente")
+                        
+                        # Limpiar formulario
+                        st.session_state.show_new_category = False
                         st.rerun()
-                    else:
-                        st.error("❌ Nombre y Precio son requeridos")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error al crear servicio: {str(e)}")
+        
+        # ===== MODO 2: EDITAR SERVICIO =====
+        elif service_mode == "✏️ Editar Servicio":
+            st.markdown("#### ✏️ Editar Servicio")
             
-            with col2:
-                if st.button("❌ Cancelar", width='stretch', key="cancel_new_svc"):
-                    st.session_state.show_new_service_form = False
-                    st.rerun()
-        
-        st.markdown("---")
-        
-        # Listar servicios
-        st.markdown("#### 📋 Servicios Registrados")
-        
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM services ORDER BY category, name
-            ''')
-            services = [dict(zip([desc[0] for desc in cursor.description], row)) for row in cursor.fetchall()]
-        
-        if services:
-            current_category = None
-            for svc in services:
-                # Mostrar encabezado de categoría si cambió
-                if svc['category'] != current_category:
-                    st.markdown(f"#### 📁 {svc['category']}")
-                    current_category = svc['category']
+            # Obtener servicios
+            services = db.get_services()
+            
+            if services:
+                service_options = {s['name']: s for s in services}
+                selected_service_name = st.selectbox(
+                    "Selecciona un servicio",
+                    options=list(service_options.keys()),
+                    key="edit_service_select"
+                )
                 
-                col1, col2 = st.columns([4, 1])
-                
-                with col1:
-                    st.markdown(f"**{svc['name']}**")
-                    st.caption(f"⏱️ {svc['duration']} min | 💰 ${svc['price']:,.2f} | 💳 Anticipo: ${svc['deposit']:,.2f}")
-                    if svc['description']:
-                        st.caption(f"ℹ️ {svc['description']}")
-                    status = "✅ Activo" if svc['active'] else "⭕ Inactivo"
-                    st.caption(f"Estado: {status}")
-                
-                with col2:
-                    if st.button("✏️", key=f"edit_svc_{svc['id']}", help="Editar"):
-                        st.session_state.selected_svc_id = svc['id']
-                        st.session_state.show_edit_svc_form = True
+                selected_service = service_options[selected_service_name]
                 
                 st.markdown("---")
-        else:
-            st.info("No hay servicios registrados.")
+                
+                # Obtener categoría actual
+                categories = db.get_active_categories()
+                category_options = {cat['name']: cat['id'] for cat in categories}
+                
+                edit_col1, edit_col2 = st.columns(2)
+                
+                with edit_col1:
+                    edit_name = st.text_input(
+                        "Nombre",
+                        value=selected_service['name'],
+                        key="edit_name"
+                    )
+                    edit_category = st.selectbox(
+                        "Categoría",
+                        options=list(category_options.keys()),
+                        index=list(category_options.values()).index(selected_service.get('category_id')) 
+                            if selected_service.get('category_id') in category_options.values() else 0,
+                        key="edit_category"
+                    )
+                    edit_duration = st.number_input(
+                        "Duración (minutos)",
+                        value=selected_service['duration'],
+                        min_value=15,
+                        step=15,
+                        key="edit_duration"
+                    )
+                
+                with edit_col2:
+                    edit_description = st.text_area(
+                        "Descripción",
+                        value=selected_service.get('description', ''),
+                        key="edit_description"
+                    )
+                    edit_price = st.number_input(
+                        "Precio (MXN)",
+                        value=selected_service['price'],
+                        min_value=0.0,
+                        step=50.0,
+                        key="edit_price"
+                    )
+                    edit_deposit = st.number_input(
+                        "Anticipo (MXN)",
+                        value=selected_service.get('deposit', 0),
+                        min_value=0.0,
+                        step=50.0,
+                        key="edit_deposit"
+                    )
+                
+                st.markdown("---")
+                
+                if st.button("✅ Actualizar Servicio", use_container_width=True, type="primary"):
+                    try:
+                        with db.get_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                                UPDATE services 
+                                SET name = %s, description = %s, price = %s, duration = %s, 
+                                    category_id = %s, deposit = %s
+                                WHERE id = %s
+                            """, (
+                                edit_name,
+                                edit_description,
+                                edit_price,
+                                edit_duration,
+                                category_options[edit_category],
+                                edit_deposit,
+                                selected_service['id']
+                            ))
+                            conn.commit()
+                        
+                        st.success(f"✅ Servicio '{edit_name}' actualizado")
+                        st.rerun()
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+            else:
+                st.info("ℹ️ No hay servicios registrados")
+        
+        # ===== MODO 3: VER SERVICIOS =====
+        elif service_mode == "📋 Ver Servicios":
+            st.markdown("#### 📋 Lista de Servicios")
+            
+            # Filtrar por categoría
+            categories = db.get_active_categories()
+            
+            if categories:
+                selected_cat_filter = st.selectbox(
+                    "Filtrar por categoría",
+                    options=["Todas"] + [cat['name'] for cat in categories],
+                    key="filter_category"
+                )
+                
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    if selected_cat_filter == "Todas":
+                        query = """
+                            SELECT id, name, description, price, duration, category_id, deposit
+                            FROM services
+                            WHERE active = TRUE
+                            ORDER BY category_id, name
+                        """
+                        cursor.execute(query)
+                    else:
+                        cat_id = [cat['id'] for cat in categories if cat['name'] == selected_cat_filter][0]
+                        query = """
+                            SELECT id, name, description, price, duration, category_id, deposit
+                            FROM services
+                            WHERE active = TRUE AND category_id = %s
+                            ORDER BY name
+                        """
+                        cursor.execute(query, (cat_id,))
+                    
+                    services_list = [
+                        dict(zip([desc[0] for desc in cursor.description], row))
+                        for row in cursor.fetchall()
+                    ]
+                
+                if services_list:
+                    # Mostrar tabla
+                    df = pd.DataFrame(services_list)
+                    df = df.rename(columns={
+                        'id': 'ID',
+                        'name': 'Servicio',
+                        'description': 'Descripción',
+                        'price': 'Precio',
+                        'duration': 'Duración (min)',
+                        'category_id': 'Cat ID',
+                        'deposit': 'Anticipo'
+                    })
+                    
+                    st.dataframe(df, use_container_width=True)
+                else:
+                    st.info("ℹ️ No hay servicios en esta categoría")
+        
+        # ===== MODO 4: GESTIONAR CATEGORÍAS =====
+        elif service_mode == "🔧 Gestionar Categorías":
+            st.markdown("#### 🔧 Gestión de Categorías")
+            
+            cat_action = st.radio(
+                "Elige una acción",
+                ["➕ Agregar Categoría", "📊 Ver Categorías", "✏️ Editar Categoría", "🔍 Detectar Duplicadas"],
+                horizontal=True,
+                key="cat_action"
+            )
+            
+            # ===== NUEVA SECCIÓN: AGREGAR CATEGORÍA =====
+            if cat_action == "➕ Agregar Categoría":
+                st.markdown("#### ➕ Crear Nueva Categoría")
+                
+                with st.form("form_new_category", clear_on_submit=True):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        new_cat_name = st.text_input(
+                            "Nombre de la categoría *",
+                            placeholder="ej: Cabello, Uñas, Masaje",
+                            max_chars=100
+                        )
+                        new_cat_icon = st.selectbox(
+                            "Ícono 🎨",
+                            ["💅", "💇", "💆", "✨", "🎨", "🪮", "📋", "💄", "🧖", "💆‍♀️", "👄", "🏖️"],
+                            index=0
+                        )
+                    
+                    with col2:
+                        new_cat_desc = st.text_area(
+                            "Descripción",
+                            placeholder="Describe brevemente esta categoría de servicios",
+                            max_chars=200
+                        )
+                        new_cat_color = st.color_picker("Color de la categoría", value="#EC4899")
+                    
+                    # Botón para crear
+                    submitted = st.form_submit_button("✅ Crear Categoría", use_container_width=True)
+                    
+                    if submitted:
+                        # Validar que no esté vacío
+                        if not new_cat_name.strip():
+                            st.error("❌ El nombre de la categoría no puede estar vacío")
+                        else:
+                            # Intentar crear
+                            success, msg, cat_id = db.create_category(
+                                name=new_cat_name.strip(),
+                                description=new_cat_desc.strip(),
+                                icon=new_cat_icon,
+                                color=new_cat_color
+                            )
+                            
+                            if success:
+                                st.success(f"✅ {msg}")
+                                st.info(f"ID de la categoría: {cat_id}")
+                                st.balloons()
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {msg}")
+            
+            # ===== VER CATEGORÍAS =====
+            elif cat_action == "📊 Ver Categorías":
+                categories = db.get_active_categories()
+                
+                if categories:
+                    df_cats = pd.DataFrame([
+                        {
+                            'Icon': cat['icon'],
+                            'Nombre': cat['name'],
+                            'Servicios': cat['service_count'],
+                            'Descripción': cat.get('description', '')
+                        }
+                        for cat in categories
+                    ])
+                    
+                    st.dataframe(df_cats, use_container_width=True)
+                else:
+                    st.info("ℹ️ No hay categorías")
+            
+            # ===== EDITAR CATEGORÍA =====
+            elif cat_action == "✏️ Editar Categoría":
+                categories = db.get_active_categories()
+                
+                if categories:
+                    selected_cat_edit = st.selectbox(
+                        "Selecciona categoría",
+                        options=[cat['name'] for cat in categories],
+                        key="cat_edit_select"
+                    )
+                    
+                    selected_cat = [c for c in categories if c['name'] == selected_cat_edit][0]
+                    
+                    st.markdown("---")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        edit_cat_name = st.text_input("Nombre", value=selected_cat['name'])
+                        edit_cat_icon = st.selectbox("Ícono", ["💅", "💇", "💆", "✨", "🎨", "🪮", "📋", "💄"], 
+                                                    index=["💅", "💇", "💆", "✨", "🎨", "🪮", "📋", "💄"].index(selected_cat['icon']))
+                    
+                    with col2:
+                        edit_cat_desc = st.text_area("Descripción", value=selected_cat.get('description', ''))
+                        edit_cat_color = st.color_picker("Color", value=selected_cat.get('color', '#EC4899'))
+                    
+                    if st.button("✅ Actualizar Categoría", use_container_width=True):
+                        success, msg = db.update_category(
+                            selected_cat['id'],
+                            name=edit_cat_name,
+                            description=edit_cat_desc,
+                            icon=edit_cat_icon,
+                            color=edit_cat_color
+                        )
+                        
+                        if success:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            
+            # ===== DETECTAR DUPLICADAS =====
+            elif cat_action == "🔍 Detectar Duplicadas":
+                st.markdown("---")
+                
+                duplicates = db.get_duplicate_categories()
+                
+                if duplicates:
+                    st.warning(f"⚠️ Se encontraron {len(duplicates)} categorías con variaciones:")
+                    
+                    for dup in duplicates:
+                        st.markdown(f"""
+                        **Nombre limpio:** `{dup['clean_name']}`
+                        - Total servicios: {dup['total_services']}
+                        - Variaciones encontradas: {dup['num_variations']}
+                        - Ejemplos: {', '.join(dup['variations'][:3])}
+                        """)
+                    
+                    st.info("Para normalizar manualmente, edita cada servicio y asigna la categoría correcta")
+                else:
+                    st.success("✅ No se encontraron categorías duplicadas")
+
     
     # ===== TAB 3: PROFESIONAL-SERVICIO =====
     with tab3:

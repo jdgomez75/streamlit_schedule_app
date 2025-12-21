@@ -1,11 +1,10 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
-from src.database import Database
 import json
 import os
 import src.notifications
-
+from datetime import datetime, timedelta
+from src.database import Database
 
 # Configuración de la página
 st.set_page_config(
@@ -86,7 +85,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Inicializar base de datos
-@st.cache_resource
 def init_db():
     return Database()
 
@@ -111,6 +109,12 @@ if 'current_booking_code' not in st.session_state:
     st.session_state.current_booking_code = None
 if 'last_booking_id' not in st.session_state:
     st.session_state.last_booking_id = None
+if 'payment_validation_result' not in st.session_state:
+    st.session_state.payment_validation_result = None
+if 'payment_confirmed' not in st.session_state:
+    st.session_state.payment_confirmed = False
+if 'payment_error' not in st.session_state:
+    st.session_state.payment_error = None
 
 # ==================== FUNCIONES AUXILIARES ====================
 
@@ -349,8 +353,12 @@ def render_home():
         if st.button("💬 Contactar", use_container_width=True, key="contact"):
             st.info("📱 WhatsApp: +52 55 1234 5678\n📧 Email: info@bellaclinic.com")
 
+# ============================================
+# REEMPLAZAR en app.py: función render_services()
+# ============================================
+
 def render_services():
-    """Vista de servicios con categorías como botones"""
+    """Vista de servicios con categorías desde tabla de BD"""
     if st.button("← Volver", key="back_to_home"):
         st.session_state.current_view = 'home'
         st.rerun()
@@ -362,82 +370,135 @@ def render_services():
     if 'selected_category' not in st.session_state:
         st.session_state.selected_category = None
     
-    services = db.get_services()
+    # CAMBIO 1: Obtener categorías desde tabla
+    categories = db.get_active_categories()
     
-    if not services:
-        st.warning("No hay servicios disponibles")
+    if not categories:
+        st.warning("⚠️ No hay categorías disponibles")
         return
-    
-    # Agrupar servicios por categoría
-    categories = {}
-    for service in services:
-        cat = service.get('category', 'General')
-        if cat not in categories:
-            categories[cat] = []
-        categories[cat].append(service)
     
     # Mostrar botones de categorías
     st.markdown("### 📁 Selecciona una Categoría")
-    cols = st.columns(len(categories))
     
-    for idx, (category, category_services) in enumerate(sorted(categories.items())):
-        with cols[idx]:
-            num_services = len(category_services)
+    # Crear columnas dinámicamente según número de categorías
+    num_cols = min(len(categories), 6)  # Máximo 6 columnas
+    cols = st.columns(num_cols)
+    
+    for idx, category in enumerate(categories):
+        with cols[idx % num_cols]:
+            # CAMBIO 2: Usar datos de la tabla de categorías
+            category_name = category['name']
+            icon = category.get('icon', '📁')
+            service_count = category['service_count']
+            
+            # Botón con ícono dinámico y contador
+            button_label = f"{icon} {category_name}\n({service_count} servicios)"
+            
             if st.button(
-                f"📍 {category}\n({num_services} servicios)",
-                key=f"category_{category}",
+                button_label,
+                key=f"category_{category['id']}",
                 use_container_width=True
             ):
-                st.session_state.selected_category = category
+                st.session_state.selected_category = category['id']
                 st.rerun()
     
     # Mostrar servicios de la categoría seleccionada
     if st.session_state.selected_category:
-        selected_cat = st.session_state.selected_category
-        category_services = categories.get(selected_cat, [])
+        selected_cat_id = st.session_state.selected_category
         
-        st.markdown(f"### 💅 Servicios en {selected_cat}")
-        st.markdown("---")
+        # CAMBIO 3: Obtener la categoría para mostrar su nombre
+        selected_category = None
+        for cat in categories:
+            if cat['id'] == selected_cat_id:
+                selected_category = cat
+                break
         
-        # Mostrar servicios en columnas de 2
-        cols = st.columns(2)
-        
-        for idx, service in enumerate(category_services):
-            with cols[idx % 2]:
-                st.markdown(f"""
-                <div class='service-card'>
-                    <h4>{service['name']}</h4>
-                    <p style='font-size: 0.9rem; color: #666;'>{service.get('description', '')}</p>
-                    <p style='margin-top: 1rem;'>
-                        <strong style='color: #EC4899;'>${service['price']}</strong> | 
-                        <span style='color: #A855F7;'>⏱️ {service['duration']} min</span>
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
+        if selected_category:
+            # CAMBIO 4: Obtener servicios de la categoría
+            category_services = db.get_services_by_category(selected_cat_id)
+            
+            st.markdown(f"### {selected_category['icon']} Servicios en {selected_category['name']}")
+            st.markdown("---")
+            
+            if not category_services:
+                st.info("📭 No hay servicios en esta categoría")
+            else:
+                # Mostrar servicios en columnas de 2
+                cols = st.columns(2)
                 
-                if st.button(
-                    f"✅ Agregar a tu cita",
-                    key=f"add_{service['id']}",
-                    use_container_width=True
-                ):
-                    add_to_cart(service)
-                    st.success(f"✅ {service['name']} agregado a tu cita")
+                for idx, service in enumerate(category_services):
+                    with cols[idx % 2]:
+                        st.markdown(f"""
+                        <div class='service-card'>
+                            <h4>{service['name']}</h4>
+                            <p style='font-size: 0.9rem; color: #666;'>{service.get('description', '')}</p>
+                            <p style='margin-top: 1rem;'>
+                                <strong style='color: #EC4899;'>${service['price']}</strong> | 
+                                <span style='color: #A855F7;'>⏱️ {service['duration']} min</span>
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if st.button(
+                            f"✅ Agregar a tu cita",
+                            key=f"add_{service['id']}",
+                            use_container_width=True
+                        ):
+                            add_to_cart(service)
+                            st.rerun()
+            
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("← Volver a Categorías", key="back_categories", use_container_width=True):
+                    st.session_state.selected_category = None
                     st.rerun()
-        
-        st.markdown("---")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("← Volver a Categorías", key="back_categories", use_container_width=True):
-                st.session_state.selected_category = None
-                st.rerun()
-        
-        with col2:
-            if st.button("🛒 Ver Carrito", key="view_cart", use_container_width=True):
-                st.session_state.current_view = 'cart'
-                st.rerun()
+            
+            with col2:
+                if st.button("🛒 Ver Carrito", key="view_cart", use_container_width=True):
+                    st.session_state.current_view = 'cart'
+                    st.rerun()
     else:
         st.info("👆 Selecciona una categoría para ver los servicios disponibles")
+
+
+# ============================================
+# NUEVA FUNCIÓN AUXILIAR
+# ============================================
+
+def get_services():
+    """
+    Obtiene todos los servicios activos
+    (Mantener compatible con código existente)
+    """
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                id, name, description, price, duration, 
+                category, category_id, deposit, anticipo, active
+            FROM services
+            WHERE active = TRUE
+            ORDER BY name
+        """)
+        
+        services = []
+        for row in cursor.fetchall():
+            services.append({
+                'id': row[0],
+                'name': row[1],
+                'description': row[2],
+                'price': float(row[3]) if row[3] else 0,
+                'duration': row[4],
+                'category': row[5],
+                'category_id': row[6],
+                'deposit': float(row[7]) if row[7] else 0,
+                'anticipo': float(row[8]) if row[8] else 0,
+                'active': row[9]
+            })
+        
+        return services
 
 def render_cart():
     """Vista del carrito"""
@@ -531,30 +592,40 @@ def render_calendar():
         if not slots:
             st.warning("⚠️ No hay horarios disponibles para esta fecha con estos servicios.")
         else:
-            # Crear grid de horarios 3x3
-            slot_grid = [slots[i:i+3] for i in range(0, min(9, len(slots)), 3)]
+            st.markdown("### 🕐 Horarios disponibles")
             
-            for row in slot_grid:
-                cols = st.columns(3)
-                for col_idx, slot in enumerate(row):
-                    with cols[col_idx]:
-                        prof_name = slot['professionals'][0]['name']
-                        button_key = f"slot_{col_idx}_{slot['start_time']}"
-                        if st.button(
-                            f"**{slot['start_time']} - {slot['end_time']}**\n\n👤 {prof_name}", 
-                            key=button_key,
-                            use_container_width=True
-                        ):
-                            st.session_state.selected_slot = {
-                                'start_time': slot['start_time'],
-                                'end_time': slot['end_time'],
-                                'duration': slot['duration'],
-                                'type': slot['type'],
-                                'professionals': slot['professionals'],
-                                'description': slot.get('description', '')
-                            }
-                            st.session_state.current_view = 'checkout'
-                            st.rerun()
+            # Preparar opciones de slots
+            slot_options = [
+                f"{slot['start_time']} - {slot['end_time']} | {slot['professionals'][0]['name']}" 
+                for slot in slots
+            ]
+            
+            # Selectbox para elegir horario
+            selected_slot_str = st.selectbox(
+                "Selecciona tu horario preferido:",
+                options=slot_options,
+                key="time_slot_select"
+            )
+            
+            if selected_slot_str:
+                # Encontrar el slot seleccionado
+                selected_slot_idx = slot_options.index(selected_slot_str)
+                selected_slot_data = slots[selected_slot_idx]
+                
+                # Mostrar resumen
+                st.info(f"✓ Horario seleccionado: {selected_slot_str}")
+                
+                if st.button("✅ Confirmar Horario", use_container_width=True, key="confirm_slot"):
+                    st.session_state.selected_slot = {
+                        'start_time': selected_slot_data['start_time'],
+                        'end_time': selected_slot_data['end_time'],
+                        'duration': selected_slot_data['duration'],
+                        'type': selected_slot_data['type'],
+                        'professionals': selected_slot_data['professionals'],
+                        'description': selected_slot_data.get('description', '')
+                    }
+                    st.session_state.current_view = 'checkout'
+                    st.rerun()
                             
 def render_checkout():
     """Vista de checkout y pago"""
@@ -624,7 +695,7 @@ def render_checkout():
             st.stop()
         
         # Crear cita con código único
-        booking_id, booking_code = db.create_booking(
+        success, booking_code, booking_id = db.create_booking(
             client_name=name,
             client_phone=phone,
             client_email=email,
@@ -634,15 +705,30 @@ def render_checkout():
             professional_id=prof.get('id'),
             services=st.session_state.cart,
             total_price=total,
-            deposit_paid=deposit
+            deposit_paid=0
         )
 
         # Guardar código de cita en session
         st.session_state.current_booking_code = booking_code
         st.session_state.last_booking_id = booking_id
         
+        if not booking_code or not booking_id:
+            st.error("❌ Error: No se pudo crear la cita. Intenta de nuevo.")
+            st.stop()
+
         # Crear registro de pago
-        db.create_payment(booking_code, booking_id, deposit, 'deposit')
+        success_payment, payment_result = db.create_payment(
+            booking_code=booking_code,
+            booking_id=booking_id,
+            amount=deposit,
+            payment_method='deposit',
+            payment_status='pending'
+        )
+
+        if not success_payment:
+            st.error(f"❌ {payment_result}")
+            # Opcionalmente, podría cancelarse la cita aquí si no se puede crear el pago
+            st.stop()
         
         # Marcar el horario como ocupado en la tabla de schedules
         if booking_code and prof:
@@ -758,29 +844,56 @@ def render_manage_booking():
             for service in services:
                 st.caption(f"• {service['service_name']} - ${service['service_price']}")
             
+            # Obtener depósito requerido
+            required_deposit = db.get_required_deposit(booking['id'])
+             # ← AGREGAR ESTA LÍNEA
+            required_deposit = float(required_deposit) if required_deposit else 0
+            # ← Y ESTA LÍNEA
+            deposit_paid = float(booking['deposit_paid'])
+
             st.markdown(f"""
             #### 📅 Información de la cita:
             
             **Fecha:** {booking['date']}  
             **Hora:** {booking['start_time']} - {booking['end_time']}  
             **Total:** ${booking['total_price']} MXN  
-            **Anticipo pagado:** ${booking['deposit_paid']} MXN  
-            **Pendiente:** ${booking['total_price'] - booking['deposit_paid']} MXN
+            **Anticipo requerido:** ${required_deposit:.2f} MXN  
+            **Anticipo pagado:** ${deposit_paid:.2f} MXN  
+            **Pendiente:** ${required_deposit - deposit_paid:.2f} MXN
             """)
             
-            # Mostrar estado de pago
-            payment = db.get_payments_by_booking(booking_code)
-            if payment:
-                st.markdown(f"#### 💳 Estado de pago:")
-                payment_status = {
-                    'pending': '⏳ Pendiente',
-                    'receipt_pending_verification': '📸 Comprobante cargado, esperando verificación',
-                    'verified': '✅ Verificado',
-                    'rejected': '❌ Rechazado'
-                }
-                st.info(f"Estado: {payment_status.get(payment['payment_status'], payment['payment_status'])}")
-            
             st.markdown("---")
+            
+            # ========== SECCIÓN DE PAGO ==========
+            st.markdown("#### 💳 Estado de Pago")
+            
+            # Si el depósito NO ha sido pagado
+            if booking['deposit_paid'] == 0:
+                st.warning(f"⏳ **Depósito pendiente: ${required_deposit} MXN**")
+                
+                # Botón para pagar
+                if st.button("💳 Pagar Depósito Ahora", use_container_width=True, key="pay_deposit_now"):
+                    st.session_state.current_view = 'pay_deposit'
+                    st.session_state.current_booking_code = booking_code
+                    st.session_state.required_deposit = required_deposit
+                    st.rerun()
+            
+            # Si ya pagó el depósito
+            elif booking['deposit_paid'] > 0:
+                st.success(f"✅ **Depósito pagado: ${booking['deposit_paid']} MXN**")
+                
+                # Mostrar estado de pago en Mercado Pago si existe
+                payments = db.get_payments_by_booking(booking_code)
+                if payments:
+                    payment = payments[0]
+                    payment_status = {
+                        'pending': '⏳ Pendiente',
+                        'receipt_pending_verification': '📸 Comprobante cargado, esperando verificación',
+                        'verified': '✅ Verificado',
+                        'rejected': '❌ Rechazado'
+                    }
+                    st.info(f"Estado del pago: {payment_status.get(payment['payment_status'], payment['payment_status'])}")
+
             
             # ========== OPCIONES DE GESTIÓN ==========
             st.markdown("### Opciones de la cita")
@@ -811,6 +924,94 @@ def render_manage_booking():
                         st.session_state.current_view = 'cancel_booking'
                         st.session_state.current_booking_code = booking_code
                         st.rerun()
+
+def render_pay_deposit():
+    """Vista para pagar depósito de cita existente - Redirige a Mercado Pago"""
+    booking_code = st.session_state.current_booking_code
+    booking = db.get_booking_by_code(booking_code)
+    required_deposit = st.session_state.get('required_deposit', 0)
+    
+    if not booking:
+        st.error("Cita no encontrada")
+        return
+    
+    if st.button("← Volver", key="back_to_manage_pay"):
+        st.session_state.current_view = 'manage_booking'
+        st.rerun()
+    
+    st.markdown("## 💳 Pagar Depósito")
+    st.markdown(f"**Cita:** {booking_code}")
+    st.markdown("---")
+    
+    # Mostrar información de la cita
+    st.info(f"""
+    **Cliente:** {booking['client_name']}
+    **Monto a pagar:** ${required_deposit:.2f} MXN
+    **Fecha de la cita:** {booking['date']}
+    """)
+    
+    st.markdown("---")
+    
+    # Obtener servicios de la cita para la descripción
+    services = db.get_booking_services(booking['id'])
+    
+    # Preparar datos para Mercado Pago (igual que en checkout)
+    booking_data = {
+        'booking_code': booking_code,
+        'booking_id': booking['id'],
+        'client': {
+            'name': booking['client_name'],
+            'email': booking['client_email'],
+            'phone': booking['client_phone']
+        },
+        'services': [{'name': s['service_name'], 'price': float(s['service_price'])} for s in services],
+        'appointment': {
+            'date': str(booking['date']),
+            'start_time': str(booking['start_time']),
+            'end_time': str(booking['end_time'])
+        },
+        'payment': {
+            'total': float(booking['total_price']),
+            'deposit': float(required_deposit),
+            'remaining': float(booking['total_price'] - required_deposit)
+        }
+    }
+    
+    # Crear preferencia de Mercado Pago
+    payment_url = create_mercadopago_preference(booking_data)
+    
+    if payment_url:
+        st.markdown("### 💳 Proceder al Pago")
+        st.markdown(f"""
+        Haz clic en el botón para ir a Mercado Pago y confirmar tu pago de **${required_deposit:.2f} MXN**
+        """)
+        
+        # Botón personalizado hacia Mercado Pago (igual que en checkout)
+        st.markdown(f"""
+        <a href='{payment_url}' target='_blank'>
+            <button style='background: linear-gradient(135deg, #EC4899 0%, #A855F7 100%);
+                           color: white; padding: 1rem 2rem; border: none; border-radius: 12px;
+                           font-size: 1.1rem; font-weight: bold; cursor: pointer; width: 100%;
+                           margin-top: 1rem;'>
+                💳 Pagar ${required_deposit:.2f} MXN en Mercado Pago
+            </button>
+        </a>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.info("""
+        **Después de pagar:**
+        
+        1. Recibirás confirmación en Mercado Pago
+        2. Tu depósito será registrado automáticamente
+        3. Recibirás confirmación por WhatsApp
+        4. En caso de dudas, ingresa tu código de cita en "Gestiona tu Cita"
+        """)
+    else:
+        st.error("❌ No se pudo procesar el pago. Intenta más tarde.")
+
+
+
 
 def render_upload_payment():
     """Vista para validar pago con número de operación de Mercado Pago"""
@@ -883,17 +1084,22 @@ def render_upload_payment():
                     """)
                     
                     # Registrar validación en base de datos
-                    db.confirm_payment_with_operation(
-                        booking_code, 
-                        operation_number,
+                    success_confirmation, confirmation_message = db.confirm_payment_with_operation(
+                        booking_code,
+                        operation_number,  # Usar payment_id de Mercado Pago
                         payment_data
                     )
-                    
+
+                    if success_confirmation:
+                        st.success(f"✅ {confirmation_message}")
+                    else:
+                        st.error(f"⚠️ Confirmación pendiente: {confirmation_message}")
+
                     if st.button("Volver al Inicio", key="back_after_validation"):
                         st.session_state.current_view = 'home'
                         st.rerun()
                 
-                else:
+                else:  # ← ELSE CORRECTO: es para if is_valid
                     st.error(f"""
                     ❌ Error en la Validación
                     
@@ -905,8 +1111,9 @@ def render_upload_payment():
                     3. Si el problema persiste, contacta con soporte
                     """)
     
-    else:
+    else:  # ← ELSE CORRECTO: es para if operation_number
         st.warning("👆 Por favor ingresa el número de operación para validar tu pago")
+
 
 
 def render_cancel_booking():
@@ -1246,6 +1453,8 @@ def main():
         render_cancel_booking()
     elif view == 'reschedule_booking':
         render_reschedule_booking()
+    elif st.session_state.current_view == 'pay_deposit':
+        render_pay_deposit()
     
     # Botón de chat flotante
     st.markdown("""

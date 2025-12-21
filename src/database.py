@@ -1,13 +1,14 @@
 import psycopg2
-from psycopg2 import sql
 import uuid
+import requests
+import os
+import bcrypt
+import json
+from psycopg2 import sql
 from datetime import datetime, time, date
 from decimal import Decimal
 from contextlib import contextmanager
-import requests
-import os
 from dotenv import load_dotenv
-import bcrypt
 from psycopg2.errors import UniqueViolation
 
 # Cargar variables de entorno
@@ -493,7 +494,7 @@ class Database:
                         ''', (booking_id, service['id'], service['name'], service['price']))
                 
                 conn.commit()
-                return True, booking_code
+                return True, booking_code, booking_id
         
         except Exception as e:
             return False, f"❌ Error al crear cita: {str(e)}"
@@ -631,28 +632,145 @@ class Database:
         except Exception as e:
             return False, f"❌ Error: {str(e)}"
     
-    # ==================== MÉTODOS DE PAGOS ====================
-    
+    # ==================== MÉTODOS DE PAGOS - VERSIÓN MEJORADA ====================
+    # Agrega estas funciones a tu clase Database en database.py
+
     def create_payment(self, booking_code, booking_id, amount, payment_method='deposit', payment_status='pending'):
-        """Crea un registro de pago"""
+        """
+        Crea un registro de pago en la base de datos
+        
+        Args:
+            booking_code (str): Código de la cita
+            booking_id (int): ID de la cita
+            amount (float): Monto del pago
+            payment_method (str): Método de pago ('deposit', 'full', 'partial')
+            payment_status (str): Estado del pago ('pending', 'paid', 'verified')
+        
+        Returns:
+            tuple: (success: bool, payment_id: int or error_message: str)
+        """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO payments 
-                    (booking_code, booking_id, amount, payment_method, payment_status)
-                    VALUES (%s, %s, %s, %s, %s)
+                    (booking_code, booking_id, amount, payment_method, payment_status, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING id
-                ''', (booking_code, booking_id, amount, payment_method, payment_status))
+                ''', (booking_code, booking_id, float(amount), payment_method, payment_status, datetime.now()))
                 
                 payment_id = cursor.fetchone()[0]
                 conn.commit()
+                
+                print(f"✅ Pago creado exitosamente - ID: {payment_id}")
                 return True, payment_id
+        
         except Exception as e:
-            return False, f"❌ Error: {str(e)}"
-    
+            print(f"❌ Error en create_payment: {str(e)}")
+            return False, f"❌ Error al crear pago: {str(e)}"
+
+
+    def confirm_payment_with_operation(self, booking_code, payment_id, payment_data):
+        """
+        Confirma un pago después de validarlo con Mercado Pago
+        
+        Args:
+            booking_code (str): Código de la cita
+            payment_id (str): ID del pago en Mercado Pago (mercado_pago_id)
+            payment_data (dict): Datos del pago validados
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 1. Buscar si existe un pago para este booking_code
+                cursor.execute('''
+                    SELECT id, booking_id FROM payments 
+                    WHERE booking_code = %s
+                ''', (booking_code,))
+                
+                existing_payment = cursor.fetchone()
+                
+                if existing_payment:
+                    # Actualizar el pago existente
+                    payment_record_id = existing_payment[0]
+                    
+                    cursor.execute('''
+                        UPDATE payments
+                        SET 
+                            mercado_pago_id = %s,
+                            amount = %s,
+                            payment_method = %s,
+                            payment_status = %s,
+                            verified = TRUE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    ''', (
+                        str(payment_id),
+                        payment_data.get('amount'),
+                        payment_data.get('payment_method', 'credit_card'),
+                        'verified',
+                        payment_record_id
+                    ))
+                else:
+                    # Crear un nuevo pago (si aún no existe)
+                    # Primero obtener el booking_id del booking_code
+                    cursor.execute('SELECT id FROM bookings WHERE booking_code = %s', (booking_code,))
+                    booking_row = cursor.fetchone()
+                    
+                    if not booking_row:
+                        return False, f"❌ No se encontró la cita {booking_code}"
+                    
+                    booking_id = booking_row[0]
+                    
+                    cursor.execute('''
+                        INSERT INTO payments
+                        (booking_code, booking_id, amount, payment_method, payment_status, 
+                        mercado_pago_id, verified, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ''', (
+                        booking_code,
+                        booking_id,
+                        payment_data.get('amount'),
+                        payment_data.get('payment_method', 'credit_card'),
+                        'verified',
+                        str(payment_id)
+                    ))
+                
+                # 2. Actualizar el estado de la cita
+                cursor.execute('''
+                    UPDATE bookings
+                    SET status = 'confirmed', 
+                        deposit_paid = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE booking_code = %s
+                ''', (payment_data.get('amount'), booking_code))
+                conn.commit()
+                
+                print(f"✅ Pago confirmado - Booking: {booking_code}, MP ID: {payment_id}")
+                return True, f"✅ Pago confirmado exitosamente. ID Mercado Pago: {payment_id}"
+        
+        except Exception as e:
+            print(f"❌ Error en confirm_payment_with_operation: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False, f"❌ Error al confirmar pago: {str(e)}"
+
+
     def update_payment_status(self, payment_id, payment_status):
-        """Actualiza el estado de un pago"""
+        """
+        Actualiza el estado de un pago
+        
+        Args:
+            payment_id (int): ID del pago en la BD local
+            payment_status (str): Nuevo estado ('pending', 'paid', 'verified', 'failed', 'cancelled')
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -661,23 +779,80 @@ class Database:
                     SET payment_status = %s, updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                 ''', (payment_status, payment_id))
+                
                 conn.commit()
-                return True, "✅ Pago actualizado"
+                return True, "✅ Estado del pago actualizado"
+        
         except Exception as e:
+            print(f"❌ Error en update_payment_status: {str(e)}")
             return False, f"❌ Error: {str(e)}"
-    
+
+
+    def get_payment_by_booking_code(self, booking_code):
+        """
+        Obtiene el pago más reciente de una cita
+        
+        Args:
+            booking_code (str): Código de la cita
+        
+        Returns:
+            dict: Datos del pago o None
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM payments 
+                    WHERE booking_code = %s 
+                    ORDER BY created_at DESC 
+                    LIMIT 1
+                ''', (booking_code,))
+                
+                row = cursor.fetchone()
+                return self._row_to_dict(cursor, row) if row else None
+        
+        except Exception as e:
+            print(f"❌ Error en get_payment_by_booking_code: {str(e)}")
+            return None
+
+
     def get_payments_by_booking(self, booking_code):
-        """Obtiene todos los pagos de una cita"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM payments WHERE booking_code = %s ORDER BY created_at DESC
-            ''', (booking_code,))
-            
-            return [self._row_to_dict(cursor, row) for row in cursor.fetchall()]
-    
+        """
+        Obtiene TODOS los pagos de una cita
+        
+        Args:
+            booking_code (str): Código de la cita
+        
+        Returns:
+            list: Lista de pagos ordenados por fecha (más recientes primero)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM payments 
+                    WHERE booking_code = %s 
+                    ORDER BY created_at DESC
+                ''', (booking_code,))
+                
+                return [self._row_to_dict(cursor, row) for row in cursor.fetchall()]
+        
+        except Exception as e:
+            print(f"❌ Error en get_payments_by_booking: {str(e)}")
+            return []
+
+
     def update_deposit_paid(self, booking_code, deposit_amount):
-        """Actualiza el anticipo pagado de una cita"""
+        """
+        Actualiza el anticipo pagado de una cita
+        
+        Args:
+            booking_code (str): Código de la cita
+            deposit_amount (float): Monto del anticipo
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -686,13 +861,25 @@ class Database:
                     SET deposit_paid = %s, updated_at = CURRENT_TIMESTAMP
                     WHERE booking_code = %s
                 ''', (deposit_amount, booking_code))
+                
                 conn.commit()
                 return True, "✅ Anticipo registrado"
+        
         except Exception as e:
+            print(f"❌ Error en update_deposit_paid: {str(e)}")
             return False, f"❌ Error: {str(e)}"
-    
+
     def upload_payment_receipt(self, booking_code, receipt_path):
-        """Registra un comprobante de pago"""
+        """
+        Registra un comprobante de pago
+        
+        Args:
+            booking_code (str): Código de la cita
+            receipt_path (str): Ruta/URL del comprobante
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -700,27 +887,166 @@ class Database:
                     UPDATE payments 
                     SET receipt_image_path = %s, receipt_uploaded_at = CURRENT_TIMESTAMP
                     WHERE booking_code = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
                 ''', (receipt_path, booking_code))
+                
                 conn.commit()
                 return True, "✅ Comprobante registrado"
+        
         except Exception as e:
+            print(f"❌ Error en upload_payment_receipt: {str(e)}")
             return False, f"❌ Error: {str(e)}"
-    
+
+
     def verify_payment(self, payment_id):
-        """Marca un pago como verificado"""
+        """
+        Marca un pago como verificado
+        
+        Args:
+            payment_id (int): ID del pago
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     UPDATE payments 
-                    SET verified = TRUE, payment_status = 'verified'
+                    SET verified = TRUE, 
+                        payment_status = 'verified',
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                 ''', (payment_id,))
+                
                 conn.commit()
                 return True, "✅ Pago verificado"
+        
         except Exception as e:
+            print(f"❌ Error en verify_payment: {str(e)}")
             return False, f"❌ Error: {str(e)}"
+
+
+    def get_pending_payments(self):
+        """
+        Obtiene todos los pagos pendientes del sistema
+        
+        Returns:
+            list: Lista de pagos pendientes
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM payments 
+                    WHERE payment_status = 'pending'
+                    ORDER BY created_at DESC
+                ''')
+                
+                return [self._row_to_dict(cursor, row) for row in cursor.fetchall()]
+        
+        except Exception as e:
+            print(f"❌ Error en get_pending_payments: {str(e)}")
+            return []
+
+
+    def get_verified_payments(self, start_date=None, end_date=None):
+        """
+        Obtiene pagos verificados en un rango de fechas
+        
+        Args:
+            start_date (str): Fecha inicio (YYYY-MM-DD) - opcional
+            end_date (str): Fecha fin (YYYY-MM-DD) - opcional
+        
+        Returns:
+            list: Lista de pagos verificados
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if start_date and end_date:
+                    cursor.execute('''
+                        SELECT * FROM payments 
+                        WHERE payment_status = 'verified'
+                        AND DATE(created_at) BETWEEN %s AND %s
+                        ORDER BY created_at DESC
+                    ''', (start_date, end_date))
+                else:
+                    cursor.execute('''
+                        SELECT * FROM payments 
+                        WHERE payment_status = 'verified'
+                        ORDER BY created_at DESC
+                    ''')
+                
+                return [self._row_to_dict(cursor, row) for row in cursor.fetchall()]
+        
+        except Exception as e:
+            print(f"❌ Error en get_verified_payments: {str(e)}")
+            return []
+
+
+    def get_payment_summary(self, start_date=None, end_date=None):
+        """
+        Obtiene un resumen de pagos para reportes
+        
+        Args:
+            start_date (str): Fecha inicio (YYYY-MM-DD) - opcional
+            end_date (str): Fecha fin (YYYY-MM-DD) - opcional
+        
+        Returns:
+            dict: Resumen de pagos con totales
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if start_date and end_date:
+                    cursor.execute('''
+                        SELECT 
+                            COUNT(*) as total_payments,
+                            SUM(amount) as total_amount,
+                            AVG(amount) as average_amount,
+                            COUNT(CASE WHEN payment_status = 'verified' THEN 1 END) as verified_count,
+                            COUNT(CASE WHEN payment_status = 'pending' THEN 1 END) as pending_count,
+                            COUNT(CASE WHEN verified = TRUE THEN 1 END) as verified_true_count
+                        FROM payments
+                        WHERE DATE(created_at) BETWEEN %s AND %s
+                    ''', (start_date, end_date))
+                else:
+                    cursor.execute('''
+                        SELECT 
+                            COUNT(*) as total_payments,
+                            SUM(amount) as total_amount,
+                            AVG(amount) as average_amount,
+                            COUNT(CASE WHEN payment_status = 'verified' THEN 1 END) as verified_count,
+                            COUNT(CASE WHEN payment_status = 'pending' THEN 1 END) as pending_count,
+                            COUNT(CASE WHEN verified = TRUE THEN 1 END) as verified_true_count
+                        FROM payments
+                    ''')
+                
+                row = cursor.fetchone()
+                return self._row_to_dict(cursor, row) if row else {}
+        
+        except Exception as e:
+            print(f"❌ Error en get_payment_summary: {str(e)}")
+            return {}
     
+    def get_required_deposit(self, booking_id):
+        """Obtiene el depósito requerido (máximo de los servicios de la cita)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT MAX(s.deposit) as required_deposit
+                FROM booking_services bs
+                JOIN services s ON bs.service_id = s.id
+                WHERE bs.booking_id = %s
+            ''', (booking_id,))
+            
+            result = cursor.fetchone()
+            return result[0] if result[0] else 0
+        
     # ==================== MÉTODOS DE REPORTES ====================
     
     def get_weekly_bookings(self, professional_id, start_date):
@@ -970,3 +1296,302 @@ class Database:
     # Para eliminar un usuario
     success, message = db.delete_user(user_id)
     """
+
+    def validate_mercadopago_payment(self, payment_id, booking_code, access_token):
+        """
+        Valida un pago en Mercado Pago usando el payment_id proporcionado por el usuario.
+        
+        Args:
+            payment_id (str): ID del pago de Mercado Pago (proporcionado por el usuario)
+            booking_code (str): Código de la cita para referencia cruzada
+            access_token (str): Token de acceso de Mercado Pago
+        
+        Returns:
+            tuple: (is_valid: bool, payment_data: dict, error_message: str)
+        """
+        try:
+            # Validar que el payment_id no esté vacío
+            if not payment_id or not str(payment_id).strip():
+                return False, {}, "El ID de pago no puede estar vacío"
+            
+            # URL de la API de Mercado Pago para obtener detalles del pago
+            url = f"https://api.mercadopago.com/v1/payments/{payment_id}"
+            
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Realizar petición a Mercado Pago
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            payment = response.json()
+            
+            # Validar que el pago exista
+            if not payment or "id" not in payment:
+                return False, {}, "El pago no fue encontrado en Mercado Pago"
+            
+            # Validar que el estado sea aprobado
+            status = payment.get("status")
+            if status != "approved":
+                return False, {}, f"El pago no está aprobado. Estado actual: {status}"
+            
+            # Validar que la referencia externa coincida con el booking_code
+            external_reference = payment.get("external_reference")
+            if external_reference and external_reference != booking_code:
+                return False, {}, f"El pago no corresponde a esta cita. Referencia esperada: {booking_code}"
+            
+            # Extraer datos del pago
+            payment_data = {
+                "operation_id": payment.get("id"),
+                "amount": payment.get("transaction_amount"),
+                "status": status,
+                "date": payment.get("date_approved"),
+                "payer_email": payment.get("payer", {}).get("email"),
+                "payment_method": payment.get("payment_method", {}).get("type"),
+                "payment_type": payment.get("payment_type_id"),  # credit_card, debit_card, account_money, etc.
+                "currency": payment.get("currency_id")
+            }
+            
+            return True, payment_data, None
+        
+        except requests.exceptions.Timeout:
+            return False, {}, "Tiempo de espera agotado. Intenta nuevamente"
+        
+        except requests.exceptions.ConnectionError:
+            return False, {}, "Error de conexión con Mercado Pago. Verifica tu conexión a internet"
+        
+        except requests.exceptions.HTTPError as e:
+            # Manejar errores específicos de HTTP
+            if e.response.status_code == 404:
+                return False, {}, "El ID de pago no existe en Mercado Pago"
+            elif e.response.status_code == 401:
+                return False, {}, "Token de Mercado Pago inválido o expirado"
+            else:
+                error_detail = ""
+                try:
+                    error_detail = e.response.json().get("message", str(e))
+                except:
+                    error_detail = str(e)
+                return False, {}, f"Error en la validación: {error_detail}"
+        
+        except Exception as e:
+            return False, {}, f"Error inesperado: {str(e)}"
+        
+    # ============================================
+    # FUNCIONES DE CATEGORÍAS
+    # ============================================
+    
+    def get_active_categories(self):
+        """
+        Obtiene todas las categorías activas con su contador de servicios
+        
+        Returns:
+            list: [{'id': int, 'name': str, 'icon': str, 'service_count': int}, ...]
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    c.id,
+                    c.name,
+                    c.icon,
+                    c.description,
+                    c.color,
+                    COUNT(s.id) as service_count
+                FROM categories c
+                LEFT JOIN services s ON c.id = s.category_id AND s.active = TRUE
+                WHERE c.active = TRUE
+                GROUP BY c.id, c.name, c.icon, c.description, c.color
+                HAVING COUNT(s.id) > 0
+                ORDER BY c.name
+            """)
+            
+            categories = []
+            for row in cursor.fetchall():
+                categories.append({
+                    'id': row[0],
+                    'name': row[1],
+                    'icon': row[2],
+                    'description': row[3],
+                    'color': row[4],
+                    'service_count': row[5]
+                })
+            
+            return categories
+
+    def get_category_by_id(self, category_id):
+        """
+        Obtiene una categoría por ID
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, name, description, icon, color, active
+                FROM categories
+                WHERE id = %s
+            """, (category_id,))
+            
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'name': row[1],
+                    'description': row[2],
+                    'icon': row[3],
+                    'color': row[4],
+                    'active': row[5]
+                }
+            return None
+
+    def get_services_by_category(self, category_id):
+        """Obtiene todos los servicios activos de una categoría"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT * FROM services WHERE category_id = %s AND active = TRUE ORDER BY name',
+                (category_id,)
+            )
+            
+            return [self._row_to_dict(cursor, row) for row in cursor.fetchall()]
+
+    def create_category(self, name, description="", icon="📁", color="#EC4899"):
+        """
+        Crea una nueva categoría
+        
+        Returns:
+            tuple: (success: bool, message: str, category_id: int or None)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO categories (name, description, icon, color, active)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    RETURNING id
+                """, (name.strip(), description, icon, color))
+                
+                category_id = cursor.fetchone()[0]
+                conn.commit()
+                
+                return True, f"Categoría '{name}' creada exitosamente", category_id
+        
+        except Exception as e:
+            if 'unique' in str(e).lower():
+                return False, f"La categoría '{name}' ya existe", None
+            return False, f"Error al crear categoría: {str(e)}", None
+
+    def update_category(self, category_id, name=None, description=None, icon=None, color=None):
+        """
+        Actualiza una categoría
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                updates = []
+                values = []
+                
+                if name:
+                    updates.append("name = %s")
+                    values.append(name.strip())
+                if description is not None:
+                    updates.append("description = %s")
+                    values.append(description)
+                if icon:
+                    updates.append("icon = %s")
+                    values.append(icon)
+                if color:
+                    updates.append("color = %s")
+                    values.append(color)
+                
+                if not updates:
+                    return False, "No hay cambios para actualizar"
+                
+                values.append(category_id)
+                
+                query = f"UPDATE categories SET {', '.join(updates)} WHERE id = %s"
+                cursor.execute(query, values)
+                conn.commit()
+                
+                return True, "Categoría actualizada"
+        
+        except Exception as e:
+            return False, f"Error al actualizar: {str(e)}"
+
+    def toggle_category_active(self, category_id, active):
+        """
+        Activa/desactiva una categoría
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE categories SET active = %s WHERE id = %s
+                """, (active, category_id))
+                conn.commit()
+                return True, "Categoría actualizada"
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+
+    def get_duplicate_categories(self):
+        """
+        Encuentra categorías duplicadas o mal formateadas
+        
+        Returns:
+            list: Categorías con variaciones en nombre
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    LOWER(TRIM(category)) as cat_clean,
+                    COUNT(*) as count,
+                    array_agg(DISTINCT category) as variantes,
+                    COUNT(DISTINCT category) as num_variantes
+                FROM services
+                WHERE category IS NOT NULL
+                GROUP BY LOWER(TRIM(category))
+                HAVING COUNT(*) > 0
+                ORDER BY count DESC
+            """)
+            
+            duplicates = []
+            for row in cursor.fetchall():
+                if row[3] > 1:  # Si hay múltiples variaciones
+                    duplicates.append({
+                        'clean_name': row[0],
+                        'total_services': row[1],
+                        'variations': row[2],
+                        'num_variations': row[3]
+                    })
+            
+            return duplicates
+
+    def normalize_service_categories(self, mapping_dict):
+        """
+        Normaliza categorías de servicios basado en un mapeo
+        
+        Args:
+            mapping_dict: {'categoria_actual': 'categoria_nueva', ...}
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                for old_cat, new_cat in mapping_dict.items():
+                    cursor.execute("""
+                        UPDATE services
+                        SET category = %s
+                        WHERE LOWER(TRIM(category)) = LOWER(TRIM(%s))
+                    """, (new_cat, old_cat))
+                
+                conn.commit()
+                return True, "Categorías normalizadas exitosamente"
+        
+        except Exception as e:
+            return False, f"Error al normalizar: {str(e)}"
