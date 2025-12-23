@@ -782,7 +782,7 @@ def render_checkout():
         """, unsafe_allow_html=True)
         
         st.info(f"""
-        📱 Te enviamos confirmación por WhatsApp al {phone}
+        📱 Te enviamos confirmación por email al {email}
         
         💡 **Guarda tu código de cita** - lo necesitarás para cancelar o cambiar tu cita.
         """)
@@ -1004,7 +1004,7 @@ def render_pay_deposit():
         
         1. Recibirás confirmación en Mercado Pago
         2. Tu depósito será registrado automáticamente
-        3. Recibirás confirmación por WhatsApp
+        3. Recibirás confirmación por email
         4. En caso de dudas, ingresa tu código de cita en "Gestiona tu Cita"
         """)
     else:
@@ -1080,7 +1080,7 @@ def render_upload_payment():
                     **Fecha:** {payment_data.get('date')}
                     
                     Tu cita ha sido confirmada.
-                    Te enviaremos los detalles por WhatsApp.
+                    Te enviaremos los detalles por email.
                     """)
                     
                     # Registrar validación en base de datos
