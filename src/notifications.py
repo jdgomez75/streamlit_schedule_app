@@ -143,7 +143,7 @@ def enviar_confirmacion_cita(booking_data):
             <div class="footer">
                 <p><strong>Rubí Mata Salón</strong></p>
                 <p>Tu salón de belleza de confianza</p>
-                <p>📞 +593 999 999 999 | 📧 info@rubimatasalon.com.mx</p>
+                <p>📞 +525561907377 | 📧 info@rubimatasalon.com.mx</p>
                 <p style="margin-top: 10px; font-size: 11px; color: #999;">
                     © 2025 Rubí Mata Salón. Todos los derechos reservados.
                 </p>
