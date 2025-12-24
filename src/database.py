@@ -1087,24 +1087,29 @@ class Database:
                                      start_time, end_time, days_of_week):
         """
         Crea horarios para un profesional en un rango de fechas y días de la semana
+        Genera bloques de UNA HORA por cada hora entre start_time y end_time
         
         Parámetros:
             professional_id (int): ID del profesional
             start_date (str): Fecha inicio 'YYYY-MM-DD'
             end_date (str): Fecha fin 'YYYY-MM-DD'
-            start_time (str): Hora inicio 'HH:MM'
-            end_time (str): Hora fin 'HH:MM'
-            days_of_week (list): Lista de días ['Monday', 'Tuesday', ...]
+            start_time (str): Hora inicio 'HH:MM' (ej: '09:00')
+            end_time (str): Hora fin 'HH:MM' (ej: '18:00')
+            days_of_week (list): Lista de números de días [0=Lunes, 6=Domingo]
         
         Retorna:
             (bool, str): (éxito, mensaje)
         """
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, time
             
             # Convertir strings a dates
             start = datetime.strptime(start_date, '%Y-%m-%d').date()
             end = datetime.strptime(end_date, '%Y-%m-%d').date()
+            
+            # Convertir strings de hora a objetos time
+            start_time_obj = datetime.strptime(start_time, '%H:%M').time()
+            end_time_obj = datetime.strptime(end_time, '%H:%M').time()
             
             # Mapeo de nombres de días español → número (0=Lunes, 6=Domingo)
             day_map = {
@@ -1153,7 +1158,6 @@ class Database:
             day_numbers = sorted(list(set(day_numbers)))
             
             if not day_numbers:
-                # Debug: mostrar qué se recibió
                 return False, f"❌ No se especificaron días válidos. Recibido: {days_of_week}"
             
             # Generar fechas y crear horarios
@@ -1162,20 +1166,27 @@ class Database:
             conn = None
             
             try:
-                # Conectar directamente (no usar context manager)
+                # Conectar directamente
                 conn = psycopg2.connect(self.database_url)
                 cursor = conn.cursor()
                 
                 while current <= end:
                     # Verificar si el día actual está en los días seleccionados
-                    # weekday() retorna 0=Lunes, 6=Domingo (igual que nuestro mapeo)
                     if current.weekday() in day_numbers:
-                        # Crear slot de una hora comenzando en start_time
-                        cursor.execute('''
-                            INSERT INTO schedules (professional_id, date, start_time, available)
-                            VALUES (%s, %s, %s, TRUE)
-                        ''', (professional_id, current.strftime('%Y-%m-%d'), start_time))
-                        schedules_created += 1
+                        # Crear slots cada hora desde start_time hasta end_time
+                        current_time = start_time_obj
+                        
+                        while current_time < end_time_obj:
+                            # Insertar slot para esta hora
+                            cursor.execute('''
+                                INSERT INTO schedules (professional_id, date, start_time, available)
+                                VALUES (%s, %s, %s, TRUE)
+                            ''', (professional_id, current.strftime('%Y-%m-%d'), current_time.strftime('%H:%M')))
+                            
+                            schedules_created += 1
+                            
+                            # Pasar a la siguiente hora
+                            current_time = (datetime.combine(datetime.today(), current_time) + timedelta(hours=1)).time()
                     
                     # Ir al siguiente día
                     current += timedelta(days=1)
@@ -1192,12 +1203,7 @@ class Database:
         
         except Exception as e:
             return False, f"❌ Error: {str(e)}"
-        
 
-    """
-    database_auth_methods.py - Métodos de autenticación para agregar a la clase Database
-    Copia estos métodos y pégalos en tu archivo database.py
-    """
 
 # ==================== MÉTODOS DE AUTENTICACIÓN ====================
     def get_all_users_for_auth(self):

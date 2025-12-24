@@ -852,7 +852,7 @@ if view_mode == "📅 Calendario del Día":
             st.markdown("#### 📋 Resumen de Ocupación")
             st.dataframe(
                 df_occupation.sort_values('Ingresos', ascending=False),
-                width='stretch',
+                use_container_width=True,
                 hide_index=True
             )
         
@@ -1245,7 +1245,7 @@ elif view_mode == "💳 Gestión de Pagos":
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button("✅ Validar Pago", width='stretch', key=f"validate_{selected_payment['id']}"):
+                    if st.button("✅ Validar Pago", use_container_width=True, key=f"validate_{selected_payment['id']}"):
                         if operation_number:
                             # Obtener access token
                             try:
@@ -1282,7 +1282,7 @@ elif view_mode == "💳 Gestión de Pagos":
                             st.error("Por favor ingresa el número de operación")
                 
                 with col2:
-                    if st.button("📝 Registrar Manual", width='stretch', key=f"manual_{selected_payment['id']}"):
+                    if st.button("📝 Registrar Manual", use_container_width=True, key=f"manual_{selected_payment['id']}"):
                         # Registrar pago manual sin validar con MP
                         if amount_paid > 0:
                             st.info(f"Pago de ${amount_paid:,.2f} registrado manualmente")
@@ -1292,7 +1292,7 @@ elif view_mode == "💳 Gestión de Pagos":
                             st.error("El monto debe ser mayor a 0")
                 
                 with col3:
-                    if st.button("❌ Cancelar", width='stretch', key=f"cancel_{selected_payment['id']}"):
+                    if st.button("❌ Cancelar", use_container_width=True, key=f"cancel_{selected_payment['id']}"):
                         st.session_state.show_payment_form = False
                         st.rerun()
     
@@ -1420,7 +1420,7 @@ elif view_mode == "⚙️ Configuración":
             new_user_name = st.text_input("Nombre Completo", key="new_user_name")
             new_password = st.text_input("Contraseña", type="password", key="new_user_password")
             
-            if st.button("✅ Guardar Usuario", width='stretch'):
+            if st.button("✅ Guardar Usuario", use_container_width=True):
                 if new_username and new_user_name and new_password:
                     success, message = db.create_user(new_username, new_password, new_user_name)
                     if success:
@@ -1458,7 +1458,7 @@ elif view_mode == "⚙️ Configuración":
                     col1_r, col2_r = st.columns(2)
                     
                     with col1_r:
-                        if st.button("💾 Guardar Contraseña", width='stretch', key=f"save_pass_{user['id']}"):
+                        if st.button("💾 Guardar Contraseña", use_container_width=True, key=f"save_pass_{user['id']}"):
                             if reset_pass:
                                 success, message = db.update_password(user['username'], reset_pass)
                                 if success:
@@ -1472,7 +1472,7 @@ elif view_mode == "⚙️ Configuración":
                     
                     with col2_r:
                         # Botón de eliminación
-                        if st.button("🗑️ Eliminar Usuario", width='stretch', key=f"delete_user_{user['id']}"):
+                        if st.button("🗑️ Eliminar Usuario", use_container_width=True, key=f"delete_user_{user['id']}"):
                             st.session_state.confirm_delete_user = user['id']
 
                         if st.session_state.get('confirm_delete_user') == user['id']:
@@ -1502,7 +1502,7 @@ elif view_mode == "⚙️ Configuración":
         
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("➕ Nuevo Profesional", width='stretch'):
+            if st.button("➕ Nuevo Profesional", use_container_width=True):
                 st.session_state.show_new_professional_form = True
         
         # Formulario para nuevo profesional
@@ -1522,7 +1522,7 @@ elif view_mode == "⚙️ Configuración":
             col1, col2, col3 = st.columns([1, 1, 2])
             
             with col1:
-                if st.button("✅ Guardar", width='stretch', key="save_new_prof"):
+                if st.button("✅ Guardar", use_container_width=True, key="save_new_prof"):
                     if new_name and new_specialization:
                         with db.get_connection() as conn:
                             cursor = conn.cursor()
@@ -1538,7 +1538,7 @@ elif view_mode == "⚙️ Configuración":
                         st.error("❌ Nombre y Especialización son requeridos")
             
             with col2:
-                if st.button("❌ Cancelar", width='stretch', key="cancel_new_prof"):
+                if st.button("❌ Cancelar", use_container_width=True, key="cancel_new_prof"):
                     st.session_state.show_new_professional_form = False
                     st.rerun()
         
@@ -1584,7 +1584,7 @@ elif view_mode == "⚙️ Configuración":
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        if st.button("💾 Guardar", width='stretch', key=f"save_edit_{prof['id']}"):
+                        if st.button("💾 Guardar", use_container_width=True, key=f"save_edit_{prof['id']}"):
                             with db.get_connection() as conn:
                                 cursor = conn.cursor()
                                 cursor.execute('''
@@ -1598,12 +1598,12 @@ elif view_mode == "⚙️ Configuración":
                             st.rerun()
                     
                     with col2:
-                        if st.button("❌ Cancelar", width='stretch', key=f"cancel_edit_{prof['id']}"):
+                        if st.button("❌ Cancelar", use_container_width=True, key=f"cancel_edit_{prof['id']}"):
                             st.session_state.show_edit_prof_form = False
                             st.rerun()
                     
                     with col3:
-                        if st.button("🗑️ Eliminar", width='stretch', key=f"delete_prof_{prof['id']}"):
+                        if st.button("🗑️ Eliminar", use_container_width=True, key=f"delete_prof_{prof['id']}"):
                             st.session_state.confirm_delete_prof = prof['id']
                     
                     # Confirmación de eliminación
@@ -2226,7 +2226,7 @@ elif view_mode == "⚙️ Configuración":
                     matrix_df = pd.DataFrame(matrix_data)
                     st.dataframe(
                         matrix_df.rename(columns={'id': 'ID', 'name': 'Profesional', 'service_count': 'Servicios'}),
-                        width='stretch',
+                        use_container_width=True,
                         hide_index=True
                     )
     
@@ -2341,26 +2341,80 @@ elif view_mode == "⚙️ Configuración":
                 st.markdown("---")
                 
                 # Botón para crear horarios
-                if st.button("✅ Crear Horarios", width='stretch', key="create_schedules_btn"):
+                if st.button("✅ Crear Horarios", use_container_width=True, key="create_schedules_btn", type="primary"):
                     if not days_selected:
                         st.error("❌ Selecciona al menos un día de la semana")
                     elif start_date > end_date:
                         st.error("❌ La fecha inicio debe ser menor a la fecha fin")
+                    elif start_time >= end_time:
+                        st.error("❌ La hora inicio debe ser menor a la hora fin")
                     else:
-                        success, message = db.create_professional_schedules(
-                            professional_id=selected_prof_id,
-                            start_date=start_date.strftime('%Y-%m-%d'),
-                            end_date=end_date.strftime('%Y-%m-%d'),
-                            start_time=start_time.strftime('%H:%M'),
-                            end_time=end_time.strftime('%H:%M'),
-                            days_of_week=days_selected
-                        )
+                        # Mostrar información de lo que se va a crear
+                        with st.spinner("⏳ Creando horarios..."):
+                            success, message = db.create_professional_schedules(
+                                professional_id=selected_prof_id,
+                                start_date=start_date.strftime('%Y-%m-%d'),
+                                end_date=end_date.strftime('%Y-%m-%d'),
+                                start_time=start_time.strftime('%H:%M'),
+                                end_time=end_time.strftime('%H:%M'),
+                                days_of_week=days_selected
+                            )
                         
                         if success:
-                            st.success(message)
+                            # Extraer el número de horarios creados del mensaje
+                            import re
+                            match = re.search(r'(\d+)', message)
+                            num_horarios = int(match.group(1)) if match else 0
+                            
+                            # Calcular información adicional
+                            from datetime import datetime as dt_module
+                            start_dt = dt_module.strptime(start_date.strftime('%Y-%m-%d'), '%Y-%m-%d')
+                            end_dt = dt_module.strptime(end_date.strftime('%Y-%m-%d'), '%Y-%m-%d')
+                            
+                            dias_nombres_selected = [days_names[i] for i in days_selected]
+                            
+                            # Mostrar mensaje de éxito detallado
+                            st.success(f"✅ ¡Horarios creados exitosamente!")
+                            
+                            # Crear un contenedor con detalles
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                st.metric(
+                                    "📊 Horarios Creados",
+                                    num_horarios,
+                                    delta=f"bloques de 1 hora"
+                                )
+                            
+                            with col2:
+                                st.metric(
+                                    "📅 Rango de Fechas",
+                                    f"{start_date.strftime('%d/%m')} - {end_date.strftime('%d/%m/%y')}"
+                                )
+                            
+                            with col3:
+                                st.metric(
+                                    "⏰ Horario",
+                                    f"{start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}"
+                                )
+                            
+                            # Mostrar resumen en una caja
+                            st.info(
+                                f"""
+                                **📋 Resumen de Horarios Creados:**
+                                
+                                • **Profesional:** {selected_prof_name}
+                                • **Días:** {', '.join(dias_nombres_selected)}
+                                • **Período:** {start_date.strftime('%d de %B de %Y')} → {end_date.strftime('%d de %B de %Y')}
+                                • **Horario Diario:** {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}
+                                • **Total de Bloques:** {num_horarios} horas
+                                """
+                            )
+                            
                             st.balloons()
                         else:
-                            st.error(message)
+                            st.error(f"❌ Error al crear horarios: {message}")
+        
         
         # ===== MODO 2: VER HORARIOS =====
         elif horario_mode == "👁️ Ver Horarios":
@@ -2460,7 +2514,7 @@ elif view_mode == "⚙️ Configuración":
                     
                     # Botón para eliminar todos los horarios de este período
                     st.markdown("---")
-                    if st.button("🗑️ Eliminar todos los horarios de este período", width='stretch'):
+                    if st.button("🗑️ Eliminar todos los horarios de este período", use_container_width=True):
                         success, message = db.delete_professional_schedules(
                             professional_id=selected_prof_id,
                             start_date=view_start_date.strftime('%Y-%m-%d'),
