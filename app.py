@@ -351,7 +351,7 @@ def render_home():
     
     with col3:
         if st.button("💬 Contactar", use_container_width=True, key="contact"):
-            st.info("📱 WhatsApp: +52 55 1234 5678\n📧 Email: info@bellaclinic.com")
+            st.info("📱 WhatsApp: +52 55 6190 7377\n📧 Email: info@rubimatasalon.com.mx")
 
 # ============================================
 # REEMPLAZAR en app.py: función render_services()
@@ -673,7 +673,7 @@ def render_checkout():
     
     button_key = f"proceed_payment_{st.session_state.selected_slot['start_time'].replace(':', '')}"
     
-    name = st.text_input("Nombre completo *", placeholder="María García", key=f"client_name_{button_key}")
+    name = st.text_input("Nombre completo *", placeholder="Nombre", key=f"client_name_{button_key}")
     phone = st.text_input("Teléfono (WhatsApp) *", placeholder="5512345678", key=f"client_phone_{button_key}")
     email = st.text_input("Email *", placeholder="maria@ejemplo.com", key=f"client_email_{button_key}")
     
