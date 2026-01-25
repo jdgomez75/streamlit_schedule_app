@@ -1601,3 +1601,163 @@ class Database:
         
         except Exception as e:
             return False, f"Error al normalizar: {str(e)}"
+
+# ============================================================================
+# NUEVAS FUNCIONES PARA GESTIÓN DE HORARIOS
+# Agregar estas funciones a la clase Database en database.py
+# ============================================================================
+
+    def add_schedule_with_validation(self, professional_id, date, start_time):
+        """
+        Agrega un slot de horario disponible CON VALIDACIÓN de duplicados
+        
+        Previene:
+        - Duplicados exactos (mismo professional_id + date + start_time)
+        
+        Args:
+            professional_id (int): ID del profesional
+            date (str): Fecha en formato 'YYYY-MM-DD'
+            start_time (str): Hora en formato 'HH:MM'
+        
+        Returns:
+            tuple: (success: bool, message: str, schedule_id: int or None)
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Verificar si ya existe un horario con estos datos
+            cursor.execute('''
+                SELECT id FROM schedules
+                WHERE professional_id = %s 
+                AND date = %s 
+                AND start_time = %s
+            ''', (professional_id, date, start_time))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                return False, f"⚠️  Este horario ya existe (Profesional: {professional_id}, Fecha: {date}, Hora: {start_time})", None
+            
+            try:
+                # Si no existe, crear el horario
+                cursor.execute('''
+                    INSERT INTO schedules (professional_id, date, start_time, available)
+                    VALUES (%s, %s, %s, TRUE)
+                    RETURNING id
+                ''', (professional_id, date, start_time))
+                
+                schedule_id = cursor.fetchone()[0]
+                conn.commit()
+                
+                return True, f"✅ Horario creado exitosamente (ID: {schedule_id})", schedule_id
+            
+            except Exception as e:
+                return False, f"❌ Error al crear horario: {str(e)}", None
+
+
+    def delete_all_schedules(self):
+        """
+        Elimina TODOS los horarios de la tabla schedules
+        
+        ⚠️  OPERACIÓN IRREVERSIBLE - Usar con cuidado
+        
+        Returns:
+            tuple: (success: bool, message: str, deleted_count: int or None)
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            try:
+                # Obtener count antes
+                cursor.execute("SELECT COUNT(*) FROM schedules")
+                count_before = cursor.fetchone()[0]
+                
+                # Eliminar todos
+                cursor.execute("DELETE FROM schedules")
+                conn.commit()
+                
+                # Obtener count después
+                cursor.execute("SELECT COUNT(*) FROM schedules")
+                count_after = cursor.fetchone()[0]
+                
+                message = f"✅ Todos los horarios han sido eliminados ({count_before} registros eliminados)"
+                
+                return True, message, count_before
+            
+            except Exception as e:
+                return False, f"❌ Error al eliminar horarios: {str(e)}", None
+
+
+    def delete_schedules_by_professional(self, professional_id):
+        """
+        Elimina todos los horarios de un profesional específico
+        
+        Args:
+            professional_id (int): ID del profesional
+        
+        Returns:
+            tuple: (success: bool, message: str, deleted_count: int or None)
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            try:
+                # Obtener count antes
+                cursor.execute(
+                    "SELECT COUNT(*) FROM schedules WHERE professional_id = %s",
+                    (professional_id,)
+                )
+                count_before = cursor.fetchone()[0]
+                
+                # Eliminar todos para este profesional
+                cursor.execute(
+                    "DELETE FROM schedules WHERE professional_id = %s",
+                    (professional_id,)
+                )
+                conn.commit()
+                
+                message = f"✅ Se eliminaron {count_before} horarios para este profesional"
+                
+                return True, message, count_before
+            
+            except Exception as e:
+                return False, f"❌ Error al eliminar horarios: {str(e)}", None
+
+
+    def get_schedule_duplicates(self):
+        """
+        Detecta horarios duplicados en la tabla schedules
+        (Útil para auditoría antes de ejecutar validación)
+        
+        Returns:
+            list: Lista de duplicados encontrados
+            Ejemplo: [
+                {'professional_id': 1, 'date': '2025-01-25', 'start_time': '10:00', 'count': 3},
+                ...
+            ]
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT 
+                    professional_id,
+                    date,
+                    start_time,
+                    COUNT(*) as count
+                FROM schedules
+                GROUP BY professional_id, date, start_time
+                HAVING COUNT(*) > 1
+                ORDER BY count DESC
+            ''')
+            
+            duplicates = []
+            for row in cursor.fetchall():
+                duplicates.append({
+                    'professional_id': row[0],
+                    'date': str(row[1]),
+                    'start_time': str(row[2]),
+                    'count': row[3]
+                })
+            
+            return duplicates

@@ -84,6 +84,70 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+CSS_MEJORADO = """
+<style>
+    /* Carrito flotante */
+    .cart-badge {
+        background: linear-gradient(135deg, #EC4899 0%, #A855F7 100%);
+        color: white;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 1.1rem;
+        box-shadow: 0 4px 12px rgba(236,72,153,0.4);
+        margin: 0 auto;
+    }
+    
+    /* Servicio seleccionado */
+    .service-selected {
+        border: 2px solid #EC4899 !important;
+        background: linear-gradient(135deg, rgba(236,72,153,0.1) 0%, rgba(168,85,247,0.1) 100%) !important;
+    }
+    
+    .service-card.selected {
+        border: 2px solid #EC4899;
+        box-shadow: 0 8px 12px rgba(236,72,153,0.3);
+    }
+    
+    /* Chip de servicio en carrito */
+    .service-chip {
+        background: linear-gradient(135deg, #EC4899 0%, #A855F7 100%);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        display: inline-block;
+        margin: 0.25rem;
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+    
+    /* Resumen del carrito */
+    .cart-summary {
+        background: linear-gradient(135deg, #F0F9FF 0%, #E0E7FF 100%);
+        border: 2px solid #EC4899;
+        padding: 1.5rem;
+        border-radius: 15px;
+        margin: 1rem 0;
+    }
+    
+    /* Total */
+    .cart-total {
+        background: linear-gradient(135deg, #EC4899 0%, #A855F7 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 12px;
+        text-align: center;
+        margin-top: 1rem;
+        font-weight: bold;
+        font-size: 1.1rem;
+    }
+</style>
+"""
+
 # Inicializar base de datos
 def init_db():
     return Database()
@@ -323,6 +387,62 @@ def create_mercadopago_preference(booking_data):
         st.error(f"❌ Error de Mercado Pago: {str(e)}")
         return None
     
+    # ============================================================================
+# PASO 2: FUNCIÓN AUXILIAR - Mostrar carrito resumido
+# ============================================================================
+
+def render_cart_summary():
+    """
+    Muestra un resumen del carrito actual.
+    Úsalo en la sección de servicios para mostrar qué está en el carrito.
+    """
+    if not st.session_state.cart:
+        st.info("🛒 Tu carrito está vacío")
+        return False
+    
+    st.markdown("""
+    <div class='cart-summary'>
+    """, unsafe_allow_html=True)
+    
+    st.markdown(f"### 🛒 Carrito Actual ({len(st.session_state.cart)} servicio{'s' if len(st.session_state.cart) > 1 else ''})")
+    
+    # Mostrar servicios como chips
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        services_html = ""
+        for service in st.session_state.cart:
+            services_html += f"<span class='service-chip'>{service['name']} - ${service['price']}</span>"
+        
+        st.markdown(services_html, unsafe_allow_html=True)
+    
+    with col2:
+        # Botón para ver carrito
+        if st.button("📋 Ver Carrito", use_container_width=True, key="view_cart_from_services"):
+            st.session_state.current_view = 'cart'
+            st.rerun()
+    
+    # Mostrar totales
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("💰 Total", f"${get_total_price()}")
+    with col2:
+        st.metric("⏱️ Duración", f"{get_total_duration()} min")
+    with col3:
+        st.metric("🎁 Anticipo", f"${calculate_deposit()}")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    return True
+
+# ============================================================================
+# PASO 3: FUNCIÓN AUXILIAR - Verificar si servicio está en carrito
+# ============================================================================
+
+def is_service_in_cart(service_id):
+    """Verifica si un servicio está en el carrito"""
+    return any(s['id'] == service_id for s in st.session_state.cart)
+
 
 # ==================== VISTAS ====================
 
@@ -358,7 +478,7 @@ def render_home():
 # ============================================
 
 def render_services():
-    """Vista de servicios con categorías desde tabla de BD"""
+    """Vista de servicios con categorías desde tabla de BD - VERSIÓN MEJORADA"""
     if st.button("← Volver", key="back_to_home"):
         st.session_state.current_view = 'home'
         st.rerun()
@@ -370,28 +490,32 @@ def render_services():
     if 'selected_category' not in st.session_state:
         st.session_state.selected_category = None
     
-    # CAMBIO 1: Obtener categorías desde tabla
+    # Obtener categorías desde tabla
     categories = db.get_active_categories()
     
     if not categories:
         st.warning("⚠️ No hay categorías disponibles")
         return
     
+    # Mostrar carrito resumido si hay items
+    if st.session_state.cart:
+        st.markdown("---")
+        render_cart_summary()
+        st.markdown("---")
+    
     # Mostrar botones de categorías
     st.markdown("### 📁 Selecciona una Categoría")
     
     # Crear columnas dinámicamente según número de categorías
-    num_cols = min(len(categories), 6)  # Máximo 6 columnas
+    num_cols = min(len(categories), 6)
     cols = st.columns(num_cols)
     
     for idx, category in enumerate(categories):
         with cols[idx % num_cols]:
-            # CAMBIO 2: Usar datos de la tabla de categorías
             category_name = category['name']
             icon = category.get('icon', '📁')
             service_count = category['service_count']
             
-            # Botón con ícono dinámico y contador
             button_label = f"{icon} {category_name}\n({service_count} servicios)"
             
             if st.button(
@@ -406,7 +530,7 @@ def render_services():
     if st.session_state.selected_category:
         selected_cat_id = st.session_state.selected_category
         
-        # CAMBIO 3: Obtener la categoría para mostrar su nombre
+        # Obtener la categoría para mostrar su nombre
         selected_category = None
         for cat in categories:
             if cat['id'] == selected_cat_id:
@@ -414,7 +538,7 @@ def render_services():
                 break
         
         if selected_category:
-            # CAMBIO 4: Obtener servicios de la categoría
+            # Obtener servicios de la categoría
             category_services = db.get_services_by_category(selected_cat_id)
             
             st.markdown(f"### {selected_category['icon']} Servicios en {selected_category['name']}")
@@ -423,29 +547,55 @@ def render_services():
             if not category_services:
                 st.info("📭 No hay servicios en esta categoría")
             else:
-                # Mostrar servicios en columnas de 2
+                # ✅ CAMBIO: Mostrar servicios en columnas de 2
                 cols = st.columns(2)
                 
                 for idx, service in enumerate(category_services):
+                    in_cart = is_service_in_cart(service['id'])
+                    
                     with cols[idx % 2]:
-                        st.markdown(f"""
-                        <div class='service-card'>
-                            <h4>{service['name']}</h4>
-                            <p style='font-size: 0.9rem; color: #666;'>{service.get('description', '')}</p>
-                            <p style='margin-top: 1rem;'>
-                                <strong style='color: #EC4899;'>${service['price']}</strong> | 
-                                <span style='color: #A855F7;'>⏱️ {service['duration']} min</span>
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        # ✅ CAMBIO: Agregar borde destacado si está en carrito
+                        if in_cart:
+                            st.markdown(f"""
+                            <div class='service-card service-selected'>
+                                <h4>✅ {service['name']}</h4>
+                                <p style='font-size: 0.9rem; color: #666;'>{service.get('description', '')}</p>
+                                <p style='margin-top: 1rem;'>
+                                    <strong style='color: #EC4899;'>${service['price']}</strong> | 
+                                    <span style='color: #A855F7;'>⏱️ {service['duration']} min</span>
+                                </p>
+                                <p style='color: #10B981; font-weight: bold; margin-top: 0.5rem;'>✓ En tu carrito</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"""
+                            <div class='service-card'>
+                                <h4>{service['name']}</h4>
+                                <p style='font-size: 0.9rem; color: #666;'>{service.get('description', '')}</p>
+                                <p style='margin-top: 1rem;'>
+                                    <strong style='color: #EC4899;'>${service['price']}</strong> | 
+                                    <span style='color: #A855F7;'>⏱️ {service['duration']} min</span>
+                                </p>
+                            </div>
+                            """, unsafe_allow_html=True)
                         
-                        if st.button(
-                            f"✅ Agregar a tu cita",
-                            key=f"add_{service['id']}",
-                            use_container_width=True
-                        ):
-                            add_to_cart(service)
-                            st.rerun()
+                        # ✅ CAMBIO: Texto diferente si ya está en carrito
+                        if in_cart:
+                            if st.button(
+                                "❌ Remover del carrito",
+                                key=f"remove_{service['id']}",
+                                use_container_width=True
+                            ):
+                                remove_from_cart(service['id'])
+                                st.rerun()
+                        else:
+                            if st.button(
+                                f"✅ Agregar a tu cita",
+                                key=f"add_{service['id']}",
+                                use_container_width=True
+                            ):
+                                add_to_cart(service)
+                                st.rerun()
             
             st.markdown("---")
             col1, col2 = st.columns(2)
@@ -501,7 +651,7 @@ def get_services():
         return services
 
 def render_cart():
-    """Vista del carrito"""
+    """Vista del carrito - VERSIÓN MEJORADA"""
     if st.button("← Volver", key="back_to_services"):
         st.session_state.current_view = 'services'
         st.rerun()
@@ -511,24 +661,63 @@ def render_cart():
     
     if not st.session_state.cart:
         st.info("Tu carrito está vacío")
+        if st.button("🛍️ Seguir comprando", use_container_width=True):
+            st.session_state.current_view = 'services'
+            st.rerun()
         return
     
-    for service in st.session_state.cart:
-        col1, col2, col3 = st.columns([3, 1, 1])
+    # ✅ CAMBIO: Mostrar servicios con mejor visual
+    st.markdown(f"### Servicios en tu carrito ({len(st.session_state.cart)})")
+    
+    for idx, service in enumerate(st.session_state.cart, 1):
+        col1, col2, col3 = st.columns([2, 1.5, 0.5])
+        
         with col1:
-            st.markdown(f"**{service['name']}** - ${service['price']} | ⏱️ {service['duration']} min")
+            st.markdown(f"""
+            **{idx}. {service['name']}**
+            
+            {service.get('description', '')}
+            """)
+        
+        with col2:
+            st.markdown(f"""
+            💰 ${service['price']}  
+            ⏱️ {service['duration']} min
+            """)
+        
         with col3:
-            if st.button("❌ Eliminar", key=f"remove_{service['id']}", use_container_width=True):
+            if st.button("🗑️", key=f"remove_{service['id']}", help="Eliminar del carrito"):
                 remove_from_cart(service['id'])
+                st.rerun()
     
     st.markdown("---")
-    st.markdown(f"### Total: ${get_total_price()} MXN")
-    st.markdown(f"### Duración total: {get_total_duration()} minutos")
-    st.markdown(f"### Anticipo requerido: ${calculate_deposit()} MXN")
     
-    if st.button("📅 Seleccionar Fecha y Hora", use_container_width=True, key="proceed_calendar", type="primary"):
-        st.session_state.current_view = 'calendar'
-        st.rerun()
+    # ✅ CAMBIO: Mostrar totales con mejor estilo
+    st.markdown(f"""
+    <div class='cart-summary'>
+    <h3>📊 Resumen de tu Cita</h3>
+    
+    | Concepto | Valor |
+    |----------|-------|
+    | 💰 Total de Servicios | ${get_total_price()} MXN |
+    | ⏱️ Duración Total | {get_total_duration()} minutos |
+    | 🎁 Anticipo a Pagar | ${calculate_deposit()} MXN |
+    
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🛍️ Seguir comprando", use_container_width=True, key="continue_shopping"):
+            st.session_state.current_view = 'services'
+            st.rerun()
+    
+    with col2:
+        if st.button("📅 Seleccionar Fecha y Hora", use_container_width=True, key="proceed_calendar", type="primary"):
+            st.session_state.current_view = 'calendar'
+            st.rerun()
+
 
 def render_calendar():
     """Vista de selección de fecha y hora"""
@@ -558,12 +747,12 @@ def render_calendar():
     st.markdown("---")
     
     today = datetime.now().date()
-    dates = [today + timedelta(days=i) for i in range(1, 30)]
+    dates = [today + timedelta(days=i) for i in range(0, 30)]
     
-    st.markdown("### Fechas disponibles")
+    st.markdown("### 📅 Fechas disponibles - Elige tu día preferido")
     
     # Crear grid de 3x3 manualmente
-    date_grid = [dates[i:i+3] for i in range(0, min(9, len(dates)), 3)]
+    date_grid = [dates[i:i+3] for i in range(0, min(12, len(dates)), 3)]
     
     for row in date_grid:
         cols = st.columns(3)
@@ -1249,7 +1438,7 @@ def render_reschedule_booking():
     st.markdown("### Selecciona nueva fecha y hora")
     
     today = datetime.now().date()
-    dates = [today + timedelta(days=i) for i in range(1, 30)]
+    dates = [today + timedelta(days=i) for i in range(0, 30)]
     
     cols = st.columns(3)
     selected_new_date = None

@@ -2235,17 +2235,28 @@ elif view_mode == "⚙️ Configuración":
 # Busca: with tab4:
 # Reemplaza SOLO el contenido de tab4 (hasta antes de with tab5:)
 
+    # ============================================================================
+# REEMPLAZA TODO EL CONTENIDO ENTRE:
+# with tab4:
+#     st.markdown("### ⏰ Gestión de Horarios")
+# 
+# HASTA:
+#     st.error("No hay profesionales registrados")
+# 
+# ES DECIR: REEMPLAZA LÍNEAS 2238 A 2602
+# ============================================================================
+
     with tab4:
         st.markdown("### ⏰ Gestión de Horarios")
         
         # Subtabs para Crear/Ver horarios
         horario_mode = st.radio(
             "Modo de Horarios",
-            ["📅 Crear Horarios Masivos", "👁️ Ver Horarios", "📊 Estadísticas"],
+            ["📅 Crear Horarios Masivos", "🧹 Mantenimiento", "👁️ Ver Horarios", "📊 Estadísticas"],
             horizontal=True
         )
         
-        # ===== MODO 1: CREAR HORARIOS MASIVOS =====
+        # ===== MODO 1: CREAR HORARIOS MASIVOS (CÓDIGO ORIGINAL) =====
         if horario_mode == "📅 Crear Horarios Masivos":
             st.markdown("#### ➕ Crear Horarios para un Profesional")
             st.markdown("Genera bloques de disponibilidad para asignar citas")
@@ -2416,7 +2427,90 @@ elif view_mode == "⚙️ Configuración":
                             st.error(f"❌ Error al crear horarios: {message}")
         
         
-        # ===== MODO 2: VER HORARIOS =====
+        # ===== NUEVO MODO 2: MANTENIMIENTO (LIMPIEZA Y VALIDACIÓN) =====
+        elif horario_mode == "🧹 Mantenimiento":
+            st.markdown("#### 🔧 Herramientas de Mantenimiento de Horarios")
+            st.warning("⚠️ Sección sensible - Solo para administradores")
+            
+            # TAB 2A: Limpiar todos los horarios
+            st.markdown("##### 🗑️ Limpiar Todos los Horarios")
+            st.markdown("Elimina TODOS los horarios de la tabla (operación irreversible)")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🗑️ LIMPIAR TODOS LOS HORARIOS", use_container_width=True, help="Elimina TODOS los horarios de la BD"):
+                    confirmation = st.checkbox(
+                        "Confirmo que deseo eliminar TODOS los horarios",
+                        key="confirm_delete_all_schedules"
+                    )
+                    
+                    if confirmation:
+                        success, message, deleted_count = db.delete_all_schedules()
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                            st.info(f"📝 **Próximo paso:** Crea nuevos horarios en el modo 'Crear Horarios Masivos'")
+                            st.balloons()
+                        else:
+                            st.error(message)
+            
+            with col2:
+                if st.button("🔍 Detectar Duplicados", use_container_width=True, help="Busca horarios duplicados"):
+                    duplicates = db.get_schedule_duplicates()
+                    
+                    if duplicates:
+                        st.warning(f"⚠️ Se encontraron {len(duplicates)} horarios duplicados:")
+                        
+                        for dup in duplicates:
+                            st.write(
+                                f"🔴 Prof ID: {dup['professional_id']} | "
+                                f"Fecha: {dup['date']} | "
+                                f"Hora: {dup['start_time']} "
+                                f"(**{dup['count']} repeticiones**)"
+                            )
+                        
+                        st.error("⚠️ Estos duplicados pueden causar conflictos. Considera limpiar la tabla.")
+                    else:
+                        st.success("✅ No hay horarios duplicados. La BD está limpia.")
+            
+            st.markdown("---")
+            
+            # TAB 2B: Eliminar por profesional
+            st.markdown("##### 👤 Eliminar por Profesional")
+            
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, name FROM professionals WHERE active = TRUE ORDER BY name")
+                professionals = [dict(zip([desc[0] for desc in cursor.description], row)) for row in cursor.fetchall()]
+            
+            if professionals:
+                prof_options = {p['name']: p['id'] for p in professionals}
+                selected_prof_name = st.selectbox(
+                    "Selecciona profesional para eliminar sus horarios",
+                    list(prof_options.keys()),
+                    key="delete_prof_schedules"
+                )
+                selected_prof_id = prof_options[selected_prof_name]
+                
+                if st.button(f"🗑️ Eliminar horarios de {selected_prof_name}", use_container_width=True):
+                    confirmation = st.checkbox(
+                        f"Confirmo eliminar todos los horarios de {selected_prof_name}",
+                        key="confirm_delete_prof"
+                    )
+                    
+                    if confirmation:
+                        success, message, deleted_count = db.delete_schedules_by_professional(selected_prof_id)
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                        else:
+                            st.error(message)
+            else:
+                st.error("No hay profesionales registrados")
+        
+        
+        # ===== MODO 3: VER HORARIOS (CÓDIGO ORIGINAL CON VALIDACIÓN) =====
         elif horario_mode == "👁️ Ver Horarios":
             st.markdown("#### 📋 Horarios por Profesional")
             
@@ -2530,7 +2624,7 @@ elif view_mode == "⚙️ Configuración":
             else:
                 st.error("No hay profesionales registrados")
         
-        # ===== MODO 3: ESTADÍSTICAS =====
+        # ===== MODO 4: ESTADÍSTICAS (CÓDIGO ORIGINAL) =====
         elif horario_mode == "📊 Estadísticas":
             st.markdown("#### 📊 Estadísticas de Disponibilidad")
             
