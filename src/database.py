@@ -1762,26 +1762,101 @@ class Database:
             
             return duplicates
     
-    def confirm_booking(self, booking_code, payment_status='confirmed', payment_method='mercado_pago'):
-        #Confirma una cita después de pago validado
+    def confirm_booking(self, booking_code, payment_status='approved', payment_method='mercado_pago', mercado_pago_id=None):
+        """
+        Confirma una cita después de pago validado
+        
+        Actualiza:
+        1. bookings.status -> 'confirmed'
+        2. payments -> Completa todos los campos necesarios
+           - payment_status -> Estado del pago (approved, rejected, pending)
+           - payment_method -> Método de pago (mercado_pago, cash, etc)
+           - verified -> TRUE (marca como verificado)
+           - mercado_pago_id -> ID de la transacción (si se proporciona)
+        3. schedules.available -> FALSE (marca horario como ocupado)
+        
+        Args:
+            booking_code (str): Código único de la reserva
+            payment_status (str): Estado del pago (approved, rejected, pending)
+            payment_method (str): Método de pago (mercado_pago, cash, etc)
+            mercado_pago_id (str, optional): ID de la preferencia/transacción en Mercado Pago
+        
+        Returns:
+            tuple: (success: bool, message: str)
+        """
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Actualizar estado de booking
-            cursor.execute('''
-                UPDATE bookings 
-                SET status = %s, payment_status = %s, payment_method = %s
-                WHERE booking_code = %s
-            ''', ('confirmed', payment_status, payment_method, booking_code))
-            
-            # Actualizar disponibilidad del horario
-            cursor.execute('''
-                UPDATE schedules
-                SET available = FALSE
-                WHERE id IN (
-                    SELECT schedule_id FROM bookings WHERE booking_code = %s
-                )
-            ''', (booking_code,))
-            
-            conn.commit()
-            return True, "Cita confirmada exitosamente"
+            try:
+                # 1️⃣ Obtener el booking por código
+                cursor.execute('''
+                    SELECT id, total_price, deposit_paid 
+                    FROM bookings 
+                    WHERE booking_code = %s
+                ''', (booking_code,))
+                
+                booking = cursor.fetchone()
+                
+                if not booking:
+                    return False, f"No se encontró la cita con código: {booking_code}"
+                
+                booking_id = booking[0]
+                deposit_amount = booking[2] or 0  # Monto del depósito
+                
+                # 2️⃣ Actualizar estado de booking a 'confirmed'
+                cursor.execute('''
+                    UPDATE bookings 
+                    SET status = %s, updated_at = NOW()
+                    WHERE id = %s
+                ''', ('confirmed', booking_id))
+                
+                # 3️⃣ Actualizar disponibilidad del horario (marcar como no disponible)
+                cursor.execute('''
+                    UPDATE schedules
+                    SET available = FALSE
+                    WHERE id IN (
+                        SELECT schedule_id FROM bookings WHERE booking_code = %s
+                    )
+                ''', (booking_code,))
+                
+                # 4️⃣ Verificar si ya existe un registro de pago
+                cursor.execute('''
+                    SELECT id FROM payments 
+                    WHERE booking_id = %s AND booking_code = %s
+                    LIMIT 1
+                ''', (booking_id, booking_code))
+                
+                existing_payment = cursor.fetchone()
+                
+                # Determinar si el pago está verificado
+                verified = (payment_status == 'approved')
+                
+                if existing_payment:
+                    # Actualizar pago existente con TODOS los campos
+                    cursor.execute('''
+                        UPDATE payments 
+                        SET payment_status = %s,
+                            payment_method = %s,
+                            verified = %s,
+                            mercado_pago_id = CASE 
+                                WHEN %s IS NOT NULL THEN %s 
+                                ELSE mercado_pago_id 
+                            END,
+                            updated_at = NOW()
+                        WHERE booking_id = %s AND booking_code = %s
+                    ''', (payment_status, payment_method, verified, mercado_pago_id, mercado_pago_id, booking_id, booking_code))
+                else:
+                    # Crear nuevo registro de pago CON TODOS LOS CAMPOS
+                    cursor.execute('''
+                        INSERT INTO payments 
+                        (booking_code, booking_id, amount, payment_method, payment_status, mercado_pago_id, verified, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ''', (booking_code, booking_id, deposit_amount, payment_method, payment_status, mercado_pago_id, verified))
+                
+                conn.commit()
+                
+                status_message = "✅ Pago verificado" if verified else "⏳ Pago pendiente de verificación"
+                return True, f"{status_message}. Cita confirmada exitosamente. Código: {booking_code}"
+                
+            except Exception as e:
+                return False, f"❌ Error al confirmar la cita: {str(e)}"

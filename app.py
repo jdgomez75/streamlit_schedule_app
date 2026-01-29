@@ -619,6 +619,9 @@ def render_payment_confirmation():
     payment_status = query_params.get('payment_status', None)
     booking_code = query_params.get('booking_code', None)
     
+    # ✅ NUEVO: Obtener ID de la preferencia guardado en session
+    mercado_pago_id = st.session_state.get('last_payment_preference_id', None)
+    
     if not booking_code:
         st.error("❌ Error: No se pudo obtener el código de la cita")
         if st.button("Volver al Inicio", key="back_to_home_error"):
@@ -643,8 +646,9 @@ def render_payment_confirmation():
             # ✅ CAMBIO: Confirmación automática sin que el usuario haga nada
             success, message = db.confirm_booking(
                 booking_code=booking_code,
-                payment_status='confirmed',
-                payment_method='mercado_pago'
+                payment_status='approved',
+                payment_method='mercado_pago',
+                mercado_pago_id=mercado_pago_id  # ✅ PASAR EL ID
             )
         
         if success:
