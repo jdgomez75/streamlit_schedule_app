@@ -503,7 +503,14 @@ class Database:
         """Obtiene una cita por su código"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM bookings WHERE booking_code = %s', (booking_code,))
+            cursor.execute('''
+                SELECT 
+                    b.*,
+                    p.name as professional_name
+                FROM bookings b
+                LEFT JOIN professionals p ON b.professional_id = p.id
+                WHERE b.booking_code = %s
+            ''', (booking_code,))
             row = cursor.fetchone()
             
             return self._row_to_dict(cursor, row) if row else None
