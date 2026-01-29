@@ -1769,11 +1769,7 @@ class Database:
         Actualiza:
         1. bookings.status -> 'confirmed'
         2. payments -> Completa todos los campos necesarios
-           - payment_status -> Estado del pago (approved, rejected, pending)
-           - payment_method -> Método de pago (mercado_pago, cash, etc)
-           - verified -> TRUE (marca como verificado)
-           - mercado_pago_id -> ID de la transacción (si se proporciona)
-        3. schedules.available -> FALSE (marca horario como ocupado)
+        3. schedules.available -> FALSE (basado en professional_id, date, start_time)
         
         Args:
             booking_code (str): Código único de la reserva
@@ -1790,7 +1786,7 @@ class Database:
             try:
                 # 1️⃣ Obtener el booking por código
                 cursor.execute('''
-                    SELECT id, total_price, deposit_paid 
+                    SELECT id, total_price, deposit_paid, professional_id, date, start_time
                     FROM bookings 
                     WHERE booking_code = %s
                 ''', (booking_code,))
@@ -1802,6 +1798,9 @@ class Database:
                 
                 booking_id = booking[0]
                 deposit_amount = booking[2] or 0  # Monto del depósito
+                professional_id = booking[3]
+                booking_date = booking[4]
+                start_time = booking[5]
                 
                 # 2️⃣ Actualizar estado de booking a 'confirmed'
                 cursor.execute('''
@@ -1810,14 +1809,15 @@ class Database:
                     WHERE id = %s
                 ''', ('confirmed', booking_id))
                 
-                # 3️⃣ Actualizar disponibilidad del horario (marcar como no disponible)
+                # 3️⃣ Actualizar disponibilidad del horario
+                # Usa professional_id, date y start_time para encontrar el schedule
                 cursor.execute('''
                     UPDATE schedules
                     SET available = FALSE
-                    WHERE id IN (
-                        SELECT schedule_id FROM bookings WHERE booking_code = %s
-                    )
-                ''', (booking_code,))
+                    WHERE professional_id = %s 
+                      AND date = %s 
+                      AND start_time = %s
+                ''', (professional_id, booking_date, start_time))
                 
                 # 4️⃣ Verificar si ya existe un registro de pago
                 cursor.execute('''
@@ -1860,3 +1860,4 @@ class Database:
                 
             except Exception as e:
                 return False, f"❌ Error al confirmar la cita: {str(e)}"
+
