@@ -302,12 +302,7 @@ def send_webhook_to_n8n(booking_data):
 
 def create_mercadopago_preference(booking_data):
     """
-    Crea preferencia de pago en Mercado Pago
-    
-    CONFIGURACIÓN REQUERIDA:
-    1. Obtén tu Access Token en: https://www.mercadopago.com/developers/panel
-    2. Reemplaza 'TU_ACCESS_TOKEN_AQUI' con tu token real
-    3. La URL de retorno se configurará automáticamente
+    Crea preferencia de pago en Mercado Pago - PRODUCCIÓN
     """
     
     try:
@@ -316,34 +311,31 @@ def create_mercadopago_preference(booking_data):
         st.error("❌ Mercado Pago SDK no está instalado. Ejecuta: pip install mercado-pago")
         return None
     
-    # ⚠️ IMPORTANTE: Reemplaza esto con tu Access Token real
-    # Obtén tu token en: https://www.mercadopago.com/developers/panel/credentials
     ACCESS_TOKEN = os.getenv("MERCADOPAGO_ACCESS_TOKEN")
+    BASE_URL = os.getenv("APP_BASE_URL")
     
-    # Validar que el token sea válido
-    if ACCESS_TOKEN == "ACCESS_TOKEN":
-        st.warning("""
-        ⚠️ **MERCADO PAGO NO CONFIGURADO**
+    # En producción, BASE_URL DEBE estar definido
+    if not BASE_URL or BASE_URL == "http://localhost:8501":
+        st.error("""
+        ❌ **APP_BASE_URL no configurado correctamente**
         
-        Para activar los pagos:
-        1. Ve a: https://www.mercadopago.com/developers/panel/credentials
-        2. Copia tu Access Token
-        3. En app.py, línea ~199, reemplaza: `ACCESS_TOKEN = "TU_ACCESS_TOKEN_AQUI"`
-        4. Pegua tu token real
-        5. Guarda y reinicia la app
+        En producción, necesitas:
+        1. En Render, Settings → Environment Variables
+        2. Agrega: APP_BASE_URL=https://tu-dominio.render.com
+        3. Reinicia la app
         """)
-        # Retornar URL de prueba para demostración
-        booking_code = booking_data.get('booking_code', 'unknown')
-        return f"https://www.mercadopago.com.mx/checkout/v1/redirect?preference-id=demo&reference={booking_code}"
+        return None
+    
+    if not ACCESS_TOKEN or ACCESS_TOKEN.strip() == "":
+        st.error("❌ MERCADOPAGO_ACCESS_TOKEN no está configurado")
+        return None
     
     try:
-        # Inicializar cliente de Mercado Pago
         sdk = SDK(ACCESS_TOKEN)
         
         booking_code = booking_data.get('booking_code', 'unknown')
         deposit = booking_data.get('payment', {}).get('deposit', 0)
         
-        # Crear datos de la preferencia
         preference_data = {
             "items": [{
                 "title": f"Anticipo - {booking_data['client']['name']}",
@@ -362,31 +354,34 @@ def create_mercadopago_preference(booking_data):
             },
             "external_reference": booking_code,
             "back_urls": {
-                "success": "https://tu-dominio.com/success",
-                "failure": "https://tu-dominio.com/failure",
-                "pending": "https://tu-dominio.com/pending"
+                "success": f"{BASE_URL}?payment_status=approved&booking_code={booking_code}",
+                "failure": f"{BASE_URL}?payment_status=rejected&booking_code={booking_code}",
+                "pending": f"{BASE_URL}?payment_status=pending&booking_code={booking_code}"
             },
-            "auto_return": "approved",
-            "notification_url": "https://tu-dominio.com/webhook/mercadopago"
+            "auto_return": "approved",  # ✅ Funciona porque BASE_URL es válido
+            "notification_url": f"{BASE_URL}/api/webhook/mercadopago"
         }
         
-        # Crear la preferencia
         preference_response = sdk.preference().create(preference_data)
         preference = preference_response["response"]
         
         if preference and "id" in preference:
-            # Retornar el init_point (enlace de pago)
             init_point = preference.get("init_point")
             st.session_state.last_payment_preference_id = preference.get("id")
+            st.success(f"✅ Preferencia creada: {preference.get('id')}")
             return init_point
         else:
-            st.error("❌ Error al crear preferencia de Mercado Pago")
+            st.error("❌ Error al crear preferencia")
+            st.write("Respuesta:", preference)
             return None
             
     except Exception as e:
-        st.error(f"❌ Error de Mercado Pago: {str(e)}")
+        st.error(f"❌ Error: {str(e)}")
+        import traceback
+        st.write(traceback.format_exc())
         return None
-    
+
+
     # ============================================================================
 # PASO 2: FUNCIÓN AUXILIAR - Mostrar carrito resumido
 # ============================================================================
@@ -611,6 +606,114 @@ def render_services():
                     st.rerun()
     else:
         st.info("👆 Selecciona una categoría para ver los servicios disponibles")
+
+def render_payment_confirmation():
+    """
+    Vista para confirmar automáticamente el pago después de volver de Mercado Pago
+    
+    Se muestra cuando el usuario es redirigido desde Mercado Pago
+    """
+    
+    # Obtener parámetros de query
+    query_params = st.query_params
+    payment_status = query_params.get('payment_status', None)
+    booking_code = query_params.get('booking_code', None)
+    
+    if not booking_code:
+        st.error("❌ Error: No se pudo obtener el código de la cita")
+        if st.button("Volver al Inicio", key="back_to_home_error"):
+            st.session_state.current_view = 'home'
+            st.query_params.clear()
+            st.rerun()
+        return
+    
+    st.markdown("## 💳 Procesando tu Pago...")
+    
+    booking = db.get_booking_by_code(booking_code)
+    
+    if not booking:
+        st.error(f"❌ No se encontró la cita con código: {booking_code}")
+        return
+    
+    # Procesamiento según estado del pago
+    if payment_status == "approved":
+        st.markdown("### ✅ ¡Pago Aprobado!")
+        
+        with st.spinner("⏳ Confirmando tu cita..."):
+            # ✅ CAMBIO: Confirmación automática sin que el usuario haga nada
+            success, message = db.confirm_booking(
+                booking_code=booking_code,
+                payment_status='confirmed',
+                payment_method='mercado_pago'
+            )
+        
+        if success:
+            st.success(f"""
+            ✅ **¡Tu Cita ha sido Confirmada!**
+            
+            **Código de Cita:** {booking_code}  
+            **Fecha:** {booking['date']}  
+            **Hora:** {booking['start_time']} - {booking['end_time']}  
+            **Profesional:** {booking.get('professional_name', 'Pendiente')}  
+            
+            Te enviaremos un email con los detalles y un recordatorio 24 horas antes.
+            """)
+            
+            # Mostrar servicios contratados
+            st.markdown("#### 📋 Servicios Contratados")
+            if booking.get('services'):
+                for service in booking['services']:
+                    st.write(f"✓ {service['name']} - ${service['price']}")
+            
+            # Botón para volver
+            if st.button("🏠 Volver al Inicio", use_container_width=True, key="finish_payment"):
+                st.session_state.current_view = 'home'
+                st.query_params.clear()
+                st.rerun()
+        else:
+            st.error(f"⚠️ {message}")
+            st.info("Por favor contacta con soporte si el problema persiste")
+    
+    elif payment_status == "rejected":
+        st.error(f"""
+        ❌ **Pago Rechazado**
+        
+        Tu pago fue rechazado por Mercado Pago. Posibles razones:
+        - Fondos insuficientes
+        - Tarjeta expirada
+        - Datos incorrectos
+        
+        **¿Qué puedo hacer?**
+        1. Verifica tu tarjeta de crédito
+        2. Intenta con otro método de pago
+        3. Contacta con tu banco
+        """)
+        
+        if st.button("🔄 Intentar Nuevamente", use_container_width=True, key="retry_payment"):
+            # Redirigir a resumen para reintentar pago
+            st.session_state.current_view = 'summary'
+            st.query_params.clear()
+            st.rerun()
+    
+    elif payment_status == "pending":
+        st.warning(f"""
+        ⏳ **Pago Pendiente**
+        
+        Tu pago está siendo procesado. Esto puede tomar algunos minutos.
+        
+        **Código de Cita:** {booking_code}
+        """)
+        
+        if st.button("✅ Validar Pago", use_container_width=True, key="validate_pending"):
+            st.session_state.current_view = 'validate_payment'
+            st.session_state.validate_booking_code = booking_code
+            st.query_params.clear()
+            st.rerun()
+    
+    else:
+        st.warning("Estado de pago desconocido. Contacta con soporte.")
+
+
 
 
 # ============================================
@@ -1623,8 +1726,16 @@ def render_reschedule_booking():
 
 def main():
     view = st.session_state.current_view
-    
-    if view == 'home':
+
+    # ✅ NUEVO: Detectar retorno de Mercado Pago
+    query_params = st.query_params
+    if 'payment_status' in query_params and 'booking_code' in query_params:
+        # Usuario viene de Mercado Pago
+        st.session_state.current_view = 'payment_confirmation'
+    # Mostrar vistas
+    if st.session_state.current_view == 'payment_confirmation':
+        render_payment_confirmation()
+    elif view == 'home':
         render_home()
     elif view == 'services':
         render_services()

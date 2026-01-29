@@ -1761,3 +1761,27 @@ class Database:
                 })
             
             return duplicates
+    
+    def confirm_booking(self, booking_code, payment_status='confirmed', payment_method='mercado_pago'):
+        #Confirma una cita después de pago validado
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Actualizar estado de booking
+            cursor.execute('''
+                UPDATE bookings 
+                SET status = %s, payment_status = %s, payment_method = %s
+                WHERE booking_code = %s
+            ''', ('confirmed', payment_status, payment_method, booking_code))
+            
+            # Actualizar disponibilidad del horario
+            cursor.execute('''
+                UPDATE schedules
+                SET available = FALSE
+                WHERE id IN (
+                    SELECT schedule_id FROM bookings WHERE booking_code = %s
+                )
+            ''', (booking_code,))
+            
+            conn.commit()
+            return True, "Cita confirmada exitosamente"

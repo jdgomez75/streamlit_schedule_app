@@ -1817,8 +1817,8 @@ elif view_mode == "⚙️ Configuración":
                             if selected_prof_ids:
                                 for prof_id in selected_prof_ids:
                                     cursor.execute("""
-                                        INSERT INTO professional_services (professional_id, service_id, active)
-                                        VALUES (%s, %s, TRUE)
+                                        INSERT INTO professional_services (professional_id, service_id)
+                                        VALUES (%s, %s)
                                     """, (prof_id, service_id))
                             
                             conn.commit()
